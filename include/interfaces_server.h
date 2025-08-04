@@ -10,6 +10,9 @@
 
 #include <memory>
 #include <string>
+#include <unordered_map>
+#include <mutex>
+#include <thread>
 #include <grpcpp/grpcpp.h>
 #include <grpcpp/health_check_service_interface.h>
 #include <grpcpp/ext/proto_server_reflection_plugin.h>
@@ -17,11 +20,33 @@
 // 引入proto生成的文件
 #include "interfaces/interfaces_grpc.grpc.pb.h"
 #include "interfaces/interfaces_request_response.pb.h"
+#include "interfaces/interfaces_callback.grpc.pb.h"
 
 namespace humanoid_robot
 {
     namespace server
     {
+
+        /**
+         * 持久订阅信息
+         */
+        struct PersistentSubscription
+        {
+            std::string subscriptionId;
+            std::string objectId;
+            std::string clientEndpoint;
+            std::vector<std::string> eventTypes;
+            int64_t heartbeatInterval;
+            std::chrono::steady_clock::time_point lastHeartbeat;
+            std::unique_ptr<interfaces::ClientCallbackService::Stub> clientStub;
+
+            PersistentSubscription(const std::string &subId, const std::string &objId,
+                                   const std::string &endpoint, const std::vector<std::string> &events,
+                                   int64_t interval)
+                : subscriptionId(subId), objectId(objId), clientEndpoint(endpoint),
+                  eventTypes(events), heartbeatInterval(interval),
+                  lastHeartbeat(std::chrono::steady_clock::now()) {}
+        };
 
         /**
          * InterfaceService服务实现类
@@ -30,8 +55,8 @@ namespace humanoid_robot
         class InterfaceServiceImpl final : public interfaces::InterfaceService::Service
         {
         public:
-            InterfaceServiceImpl() = default;
-            ~InterfaceServiceImpl() = default;
+            InterfaceServiceImpl();
+            ~InterfaceServiceImpl();
 
             // 基本CRUD操作
             grpc::Status Create(grpc::ServerContext *context,
@@ -66,11 +91,24 @@ namespace humanoid_robot
             grpc::Status Unsubscribe(grpc::ServerContext *context,
                                      const interfaces::UnsubscribeRequest *request,
                                      interfaces::UnsubscribeResponse *response) override;
+
+            // 持久订阅管理
+            void PublishMessage(const std::string &objectId, const std::string &eventType,
+                                const interfaces::SubscriptionNotification &notification);
+
+        private:
+            std::unordered_map<std::string, std::unique_ptr<PersistentSubscription>> subscriptions_;
+            std::mutex subscriptions_mutex_;
+            std::thread heartbeat_thread_;
+            bool running_;
+
+            void StartHeartbeatMonitor();
+            void StopHeartbeatMonitor();
+            void CheckHeartbeats();
         };
 
         /**
-         * 简化的gRPC服务器类
-         * 参照Client-SDK的简洁模式
+         * gRPC服务器类
          */
         class InterfacesServer
         {
@@ -86,6 +124,13 @@ namespace humanoid_robot
 
             // 等待服务器关闭
             void Wait();
+
+            // 获取服务实例（用于发布消息）
+            InterfaceServiceImpl *GetService() { return service_.get(); }
+
+            // 示例：模拟发布消息
+            void SimulatePublishMessage(const std::string &objectId, const std::string &eventType,
+                                        const std::string &messageContent);
 
         private:
             std::unique_ptr<grpc::Server> server_;
