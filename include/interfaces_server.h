@@ -75,18 +75,14 @@ namespace humanoid_robot
                                const interfaces::QueryRequest *request,
                                interfaces::QueryResponse *response) override;
 
-            grpc::Status BatchCreate(grpc::ServerContext *context,
-                                     const interfaces::BatchCreateRequest *request,
-                                     interfaces::BatchCreateResponse *response) override;
-
-            grpc::Status HealthCheck(grpc::ServerContext *context,
-                                     const interfaces::HealthCheckRequest *request,
-                                     interfaces::HealthCheckResponse *response) override;
+            grpc::Status Action(::grpc::ServerContext *context,
+                                const ::interfaces::ActionRequest *request,
+                                ::grpc::ServerWriter<::interfaces::ActionResponse> *writer) override;
 
             // 流式服务
             grpc::Status Subscribe(grpc::ServerContext *context,
                                    const interfaces::SubscribeRequest *request,
-                                   grpc::ServerWriter<interfaces::SubscribeResponse> *writer) override;
+                                   interfaces::SubscribeResponse *response) override;
 
             grpc::Status Unsubscribe(grpc::ServerContext *context,
                                      const interfaces::UnsubscribeRequest *request,

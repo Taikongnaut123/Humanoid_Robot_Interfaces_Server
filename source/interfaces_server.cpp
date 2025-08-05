@@ -78,94 +78,71 @@ namespace humanoid_robot
             return grpc::Status::OK;
         }
 
-        grpc::Status InterfaceServiceImpl::BatchCreate(grpc::ServerContext *context,
-                                                       const interfaces::BatchCreateRequest *request,
-                                                       interfaces::BatchCreateResponse *response)
+        grpc::Status InterfaceServiceImpl::Action(::grpc::ServerContext *context,
+                                                  const ::interfaces::ActionRequest *request,
+                                                  ::grpc::ServerWriter<::interfaces::ActionResponse> *writer)
         {
-            std::cout << "Support BatchCreate service" << std::endl;
+            std::cout << "Support Action service" << std::endl;
 
-            response->set_overallstatus(interfaces::STATUS_SUCCESS);
-            response->set_successcount(1);
-            response->set_failedcount(0);
+            for (int i = 0; i < 3; ++i)
+            {
+                ::interfaces::ActionResponse response;
+                auto output = response.mutable_output()->mutable_keyvaluelist();
+                {
+                    base_types::Variant var;
+                    var.set_int32value(i + 1); // 示例使用整数值
+                    output->insert({"action_id", var});
+                }
+                {
+                    base_types::Variant var;
+                    var.set_stringvalue("action " + std::to_string(i + 1)); // 示例使用字符串值
+                    output->insert({"action_name", var});
+                }
 
-            return grpc::Status::OK;
-        }
-
-        grpc::Status InterfaceServiceImpl::HealthCheck(grpc::ServerContext *context,
-                                                       const interfaces::HealthCheckRequest *request,
-                                                       interfaces::HealthCheckResponse *response)
-        {
-            std::cout << "Support HealthCheck service" << std::endl;
-
-            response->set_status(interfaces::STATUS_SUCCESS);
-            response->set_message("HealthCheck service executed successfully");
-            response->set_service("InterfaceService");
+                if (!writer->Write(response))
+                {
+                    break;
+                }
+            }
 
             return grpc::Status::OK;
         }
 
         grpc::Status InterfaceServiceImpl::Subscribe(grpc::ServerContext *context,
                                                      const interfaces::SubscribeRequest *request,
-                                                     grpc::ServerWriter<interfaces::SubscribeResponse> *writer)
+                                                     interfaces::SubscribeResponse *response)
         {
             std::cout << "Subscribe service called" << std::endl;
 
-            // 检查是否为持久订阅
-            if (request->persistentsubscription())
+            std::cout << "Creating persistent subscription for objectId: " << request->objectid() << std::endl;
+
+            // 创建持久订阅
+            std::string subscriptionId = "sub_" + request->objectid() + "_" + std::to_string(std::time(nullptr));
+
+            std::vector<std::string> eventTypes;
+            for (const auto &eventType : request->eventtypes())
             {
-                std::cout << "Creating persistent subscription for objectId: " << request->objectid() << std::endl;
-
-                // 创建持久订阅
-                std::string subscriptionId = "sub_" + request->objectid() + "_" + std::to_string(std::time(nullptr));
-
-                std::vector<std::string> eventTypes;
-                for (const auto &eventType : request->eventtypes())
-                {
-                    eventTypes.push_back(eventType);
-                }
-
-                auto subscription = std::make_unique<PersistentSubscription>(
-                    subscriptionId, request->objectid(), request->clientendpoint(),
-                    eventTypes, request->heartbeatinterval());
-
-                // 创建客户端stub
-                auto channel = grpc::CreateChannel(request->clientendpoint(), grpc::InsecureChannelCredentials());
-                subscription->clientStub = interfaces::ClientCallbackService::NewStub(channel);
-
-                // 存储订阅
-                {
-                    std::lock_guard<std::mutex> lock(subscriptions_mutex_);
-                    subscriptions_[subscriptionId] = std::move(subscription);
-                }
-
-                // 发送订阅确认
-                interfaces::SubscribeResponse response;
-                response.set_status(interfaces::STATUS_SUCCESS);
-                response.set_message("Persistent subscription created: " + subscriptionId);
-                response.set_subscriptionid(subscriptionId);
-
-                writer->Write(response);
-
-                std::cout << "Persistent subscription created: " << subscriptionId << std::endl;
-            }
-            else
-            {
-                // 传统流式订阅
-                std::cout << "Creating streaming subscription" << std::endl;
-
-                for (int i = 0; i < 3; ++i)
-                {
-                    interfaces::SubscribeResponse response;
-                    response.set_status(interfaces::STATUS_SUCCESS);
-                    response.set_message("Subscribe service stream response " + std::to_string(i + 1));
-
-                    if (!writer->Write(response))
-                    {
-                        break;
-                    }
-                }
+                eventTypes.push_back(eventType);
             }
 
+            auto subscription = std::make_unique<PersistentSubscription>(
+                subscriptionId, request->objectid(), request->clientendpoint(),
+                eventTypes, request->heartbeatinterval());
+
+            // 创建客户端stub
+            auto channel = grpc::CreateChannel(request->clientendpoint(), grpc::InsecureChannelCredentials());
+            subscription->clientStub = interfaces::ClientCallbackService::NewStub(channel);
+
+            // 存储订阅
+            {
+                std::lock_guard<std::mutex> lock(subscriptions_mutex_);
+                subscriptions_[subscriptionId] = std::move(subscription);
+            }
+
+            response->set_status(interfaces::STATUS_SUCCESS);
+            response->set_message("Persistent subscription created: " + subscriptionId);
+            response->set_subscriptionid(subscriptionId);
+            std::cout << "Persistent subscription created: " << subscriptionId << std::endl;
             return grpc::Status::OK;
         }
 
