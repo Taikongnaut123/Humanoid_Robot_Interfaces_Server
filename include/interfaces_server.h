@@ -59,17 +59,9 @@ namespace humanoid_robot
             ~InterfaceServiceImpl();
 
             // 基本CRUD操作
-            grpc::Status Create(grpc::ServerContext *context,
-                                const interfaces::CreateRequest *request,
-                                interfaces::CreateResponse *response) override;
-
             grpc::Status Send(grpc::ServerContext *context,
                               const interfaces::SendRequest *request,
                               interfaces::SendResponse *response) override;
-
-            grpc::Status Delete(grpc::ServerContext *context,
-                                const interfaces::DeleteRequest *request,
-                                interfaces::DeleteResponse *response) override;
 
             grpc::Status Query(grpc::ServerContext *context,
                                const interfaces::QueryRequest *request,
@@ -88,9 +80,9 @@ namespace humanoid_robot
                                      const interfaces::UnsubscribeRequest *request,
                                      interfaces::UnsubscribeResponse *response) override;
 
-            // 持久订阅管理
+        public:
             void PublishMessage(const std::string &objectId, const std::string &eventType,
-                                const interfaces::SubscriptionNotification &notification);
+                                const interfaces::Notification &notification);
 
         private:
             std::unordered_map<std::string, std::unique_ptr<PersistentSubscription>> subscriptions_;

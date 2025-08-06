@@ -29,38 +29,27 @@ namespace humanoid_robot
             StopHeartbeatMonitor();
         }
 
-        grpc::Status InterfaceServiceImpl::Create(grpc::ServerContext *context,
-                                                  const interfaces::CreateRequest *request,
-                                                  interfaces::CreateResponse *response)
-        {
-            std::cout << "Support Create service" << std::endl;
-
-            response->set_status(interfaces::STATUS_SUCCESS);
-            response->set_message("Create service executed successfully");
-
-            return grpc::Status::OK;
-        }
-
         grpc::Status InterfaceServiceImpl::Send(grpc::ServerContext *context,
                                                 const interfaces::SendRequest *request,
                                                 interfaces::SendResponse *response)
         {
             std::cout << "Support Send service" << std::endl;
-
-            response->set_status(interfaces::STATUS_SUCCESS);
-            response->set_message("Send service executed successfully");
-
-            return grpc::Status::OK;
-        }
-
-        grpc::Status InterfaceServiceImpl::Delete(grpc::ServerContext *context,
-                                                  const interfaces::DeleteRequest *request,
-                                                  interfaces::DeleteResponse *response)
-        {
-            std::cout << "Support Delete service" << std::endl;
-
-            response->set_status(interfaces::STATUS_SUCCESS);
-            response->set_message("Delete service executed successfully");
+            auto output_map = response->mutable_output()->mutable_keyvaluelist();
+            {
+                base_types::Variant var;
+                var.set_stringvalue("send request success");
+                output_map->insert({"status_desc", var});
+            }
+            {
+                base_types::Variant var;
+                var.set_int32value(0); // 0表示成功
+                output_map->insert({"status_code", var});
+            }
+            {
+                base_types::Variant var;
+                var.set_stringvalue("Send service executed successfully");
+                output_map->insert({"message", var});
+            }
 
             return grpc::Status::OK;
         }
@@ -70,10 +59,27 @@ namespace humanoid_robot
                                                  interfaces::QueryResponse *response)
         {
             std::cout << "Support Query service" << std::endl;
-
-            response->set_status(interfaces::STATUS_SUCCESS);
-            response->set_totalcount(1);
-            response->set_hasmore(false);
+            auto output_map = response->mutable_output()->mutable_keyvaluelist();
+            {
+                base_types::Variant var;
+                var.set_stringvalue("query request success");
+                output_map->insert({"status_desc", var});
+            }
+            {
+                base_types::Variant var;
+                var.set_int32value(0); // 示例返回查询结果
+                output_map->insert({"status_code", var});
+            }
+            {
+                base_types::Variant var;
+                var.set_int32value(1); // 示例返回1条记录
+                output_map->insert({"count", var});
+            }
+            {
+                base_types::Variant var;
+                var.set_stringvalue("Query service executed successfully");
+                output_map->insert({"message", var});
+            }
 
             return grpc::Status::OK;
         }
@@ -98,6 +104,11 @@ namespace humanoid_robot
                     var.set_stringvalue("action " + std::to_string(i + 1)); // 示例使用字符串值
                     output->insert({"action_name", var});
                 }
+                {
+                    base_types::Variant var;
+                    var.set_stringvalue("Action service executed successfully - action " + std::to_string(i + 1));
+                    output->insert({"message", var});
+                }
 
                 if (!writer->Write(response))
                 {
@@ -114,23 +125,66 @@ namespace humanoid_robot
         {
             std::cout << "Subscribe service called" << std::endl;
 
-            std::cout << "Creating persistent subscription for objectId: " << request->objectid() << std::endl;
-
-            // 创建持久订阅
-            std::string subscriptionId = "sub_" + request->objectid() + "_" + std::to_string(std::time(nullptr));
-
-            std::vector<std::string> eventTypes;
-            for (const auto &eventType : request->eventtypes())
+            std::string subscriptionId;
+            // 检查是否有传入的订阅ID
+            auto &input_map = request->input().keyvaluelist();
+            auto it = input_map.find("object_id");
+            if (it == input_map.end())
             {
-                eventTypes.push_back(eventType);
+                std::cout << "object_id ID already exists: " << it->second.stringvalue() << std::endl;
+                std::cout << "using default subscription ID" << std::endl;
+                subscriptionId = "sub_default_" + std::to_string(std::time(nullptr));
+            }
+            else
+            {
+                // 创建持久订阅
+                subscriptionId = "sub_" + std::to_string(it->second.int32value()) + "_" + std::to_string(std::time(nullptr));
+            }
+            std::vector<std::string> eventTypes;
+            it = input_map.find("event_types");
+            if (it == input_map.end())
+            {
+                std::cout << "No event types provided, using default empty list" << std::endl;
+                eventTypes.push_back("default_event");
+            }
+            else
+            {
+                for (const auto &eventType : it->second.stringarrayvalue().values())
+                {
+                    eventTypes.push_back(eventType);
+                }
+            }
+
+            std::string clientEndpoint;
+            it = input_map.find("client_endpoint");
+            if (it == input_map.end())
+            {
+                std::cerr << "No client endpoint provided, cannot create subscription" << std::endl;
+                clientEndpoint = "localhost:50052"; // 使用默认值或抛出异常
+            }
+            else
+            {
+                clientEndpoint = it->second.stringvalue();
+            }
+
+            int64_t heartbeatInterval = 0;
+            it = input_map.find("heartbeat_interval");
+            if (it == input_map.end())
+            {
+                std::cout << "No heartbeat interval provided, using default 10000 ms" << std::endl;
+                heartbeatInterval = 10000; // 默认10秒
+            }
+            else
+            {
+                heartbeatInterval = it->second.int64value();
             }
 
             auto subscription = std::make_unique<PersistentSubscription>(
-                subscriptionId, request->objectid(), request->clientendpoint(),
-                eventTypes, request->heartbeatinterval());
+                subscriptionId, subscriptionId, clientEndpoint,
+                eventTypes, heartbeatInterval);
 
             // 创建客户端stub
-            auto channel = grpc::CreateChannel(request->clientendpoint(), grpc::InsecureChannelCredentials());
+            auto channel = grpc::CreateChannel(clientEndpoint, grpc::InsecureChannelCredentials());
             subscription->clientStub = interfaces::ClientCallbackService::NewStub(channel);
 
             // 存储订阅
@@ -139,9 +193,37 @@ namespace humanoid_robot
                 subscriptions_[subscriptionId] = std::move(subscription);
             }
 
-            response->set_status(interfaces::STATUS_SUCCESS);
-            response->set_message("Persistent subscription created: " + subscriptionId);
-            response->set_subscriptionid(subscriptionId);
+            auto output_map = response->mutable_output()->mutable_keyvaluelist();
+            {
+                base_types::Variant var;
+                var.set_stringvalue("persistent subscription created successfully");
+                output_map->insert({"status_desc", var});
+            }
+            {
+                base_types::Variant var;
+                var.set_stringvalue(subscriptionId);
+                output_map->insert({"subscription_id", var});
+            }
+            {
+                base_types::Variant var;
+                var.set_stringvalue(clientEndpoint);
+                output_map->insert({"client_endpoint", var});
+            }
+            {
+                base_types::Variant var;
+                var.set_int64value(heartbeatInterval);
+                output_map->insert({"heartbeat_interval", var});
+            }
+            {
+                base_types::Variant var;
+                var.set_int32value(0);
+                output_map->insert({"status_code", var});
+            }
+            {
+                base_types::Variant var;
+                var.set_stringvalue("Persistent subscription created: " + subscriptionId);
+                output_map->insert({"message", var});
+            }
             std::cout << "Persistent subscription created: " << subscriptionId << std::endl;
             return grpc::Status::OK;
         }
@@ -150,27 +232,57 @@ namespace humanoid_robot
                                                        const interfaces::UnsubscribeRequest *request,
                                                        interfaces::UnsubscribeResponse *response)
         {
-            std::cout << "Unsubscribe service called for subscription: " << request->subscriptionid() << std::endl;
+            std::cout << "Unsubscribe service called for subscription" << std::endl;
+            auto &input_map = request->input().keyvaluelist();
+            auto output_map = response->mutable_output()->mutable_keyvaluelist();
 
+            auto it = input_map.find("subscription_id");
+            if (it == input_map.end())
+            {
+                std::cout << "No subscription_id provided, cannot unsubscribe" << std::endl;
+                {
+                    base_types::Variant var;
+                    var.set_stringvalue("No subscription_id provided");
+                    output_map->insert({"status_desc", var});
+                }
+                {
+                    base_types::Variant var;
+                    var.set_int32value(-0600010001); // 1表示错误
+                    output_map->insert({"status_code", var});
+                }
+                return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "No subscription_id provided");
+            }
+            std::string subscriptionId = it->second.stringvalue();
             // 移除持久订阅
             {
                 std::lock_guard<std::mutex> lock(subscriptions_mutex_);
-                auto it = subscriptions_.find(request->subscriptionid());
+                auto it = subscriptions_.find(subscriptionId);
                 if (it != subscriptions_.end())
                 {
                     subscriptions_.erase(it);
-                    std::cout << "Persistent subscription removed: " << request->subscriptionid() << std::endl;
+                    std::cout << "Persistent subscription removed: " << subscriptionId << std::endl;
                 }
             }
-
-            response->set_status(interfaces::STATUS_SUCCESS);
-            response->set_message("Unsubscribe service executed successfully");
-
+            {
+                base_types::Variant var;
+                var.set_stringvalue("Persistent subscription removed: " + subscriptionId);
+                output_map->insert({"status_desc", var});
+            }
+            {
+                base_types::Variant var;
+                var.set_int32value(0); // 0表示成功
+                output_map->insert({"status_code", var});
+            }
+            {
+                base_types::Variant var;
+                var.set_stringvalue("Unsubscribe service executed successfully");
+                output_map->insert({"message", var});
+            }
             return grpc::Status::OK;
         }
 
         void InterfaceServiceImpl::PublishMessage(const std::string &objectId, const std::string &eventType,
-                                                  const interfaces::SubscriptionNotification &notification)
+                                                  const interfaces::Notification &notification)
         {
             std::lock_guard<std::mutex> lock(subscriptions_mutex_);
 
@@ -318,20 +430,35 @@ namespace humanoid_robot
                                                       const std::string &messageContent)
         {
             // 创建订阅通知消息
-            interfaces::SubscriptionNotification notification;
-            notification.set_subscriptionid(""); // 将由PublishMessage填充
-            notification.set_objectid(objectId);
-            notification.set_topicid(eventType);
-            notification.set_timestamp(std::chrono::duration_cast<std::chrono::milliseconds>(
-                                           std::chrono::system_clock::now().time_since_epoch())
-                                           .count());
-            notification.set_messageid("msg_" + std::to_string(notification.timestamp()));
-
-            // 设置消息内容
-            auto messageData = notification.mutable_messagedata();
-            base_types::Variant contentVariant;
-            contentVariant.set_stringvalue(messageContent);
-            (*messageData->mutable_keyvaluelist())["content"] = contentVariant;
+            interfaces::Notification notification;
+            auto message = notification.mutable_notifymessage()->mutable_keyvaluelist();
+            {
+                base_types::Variant var;
+                var.set_stringvalue("null");
+                message->insert({"subscriptionid", var});
+            }
+            {
+                base_types::Variant var;
+                var.set_stringvalue("null");
+                message->insert({"objectid", var});
+            }
+            {
+                base_types::Variant var;
+                var.set_stringvalue("news");
+                message->insert({"topicid", var});
+            }
+            {
+                base_types::Variant var;
+                auto timestamp = var.mutable_timestampvalue();
+                timestamp->set_seconds(std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()));
+                timestamp->set_nanos(0);
+                message->insert({"timestamp", var});
+            }
+            {
+                base_types::Variant var;
+                var.set_stringvalue("msg_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count()));
+                message->insert({"messageid", var});
+            }
 
             std::cout << "Publishing message for objectId: " << objectId
                       << ", eventType: " << eventType
