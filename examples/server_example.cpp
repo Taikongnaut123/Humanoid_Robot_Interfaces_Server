@@ -1,8 +1,8 @@
 /**
  * Copyright (c) 2025 Humanoid Robot, Inc. All rights reserved.
  *
- * gRPC Server Example - 简化版本
- * 参照Client-SDK模式构建
+ * gRPC Server Example - 多线程回调架构演示
+ * 特性：持久订阅、非阻塞回调、线程安全管理
  */
 
 #include <iostream>
@@ -32,7 +32,7 @@ int main()
     signal(SIGTERM, SignalHandler);
 
     std::cout << "=== Humanoid Robot gRPC Interface Server ===" << std::endl;
-    std::cout << "Based on interfaces_grpc.proto - Client-SDK compatible" << std::endl;
+    std::cout << "Multi-threaded callback architecture with persistent subscriptions" << std::endl;
 
     try
     {
@@ -49,7 +49,8 @@ int main()
 
         std::cout << "🚀 Server ready! Client-SDK can connect now!" << std::endl;
         std::cout << "📡 Listening on: " << server_address << std::endl;
-        std::cout << "🔧 Each service outputs 'Support xxx service'" << std::endl;
+        std::cout << "🔧 Multi-threaded callback notifications enabled" << std::endl;
+        std::cout << "💬 Subscribe service creates persistent connections" << std::endl;
         std::cout << "\nPress Ctrl+C to stop...\n"
                   << std::endl;
 

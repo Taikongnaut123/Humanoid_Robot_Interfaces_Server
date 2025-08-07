@@ -2,7 +2,11 @@
  * Copyright (c) 2025 Humanoid Robot, Inc. All rights reserved.
  *
  * Interfaces Server - gRPC服务端实现
- * 基于Client-SDK模式构建，避免复杂的gRPC初始化
+ * 特性：
+ * - 多线程回调架构，支持非阻塞通知
+ * - 持久化订阅管理，自动心跳监控
+ * - 线程安全的订阅存储和访问控制
+ * - 完整的CRUD操作和流式服务支持
  */
 
 #ifndef HUMANOID_ROBOT_INTERFACES_SERVER_H
@@ -50,7 +54,7 @@ namespace humanoid_robot
 
         /**
          * InterfaceService服务实现类
-         * 简化实现，参照Client-SDK模式
+         * 多线程回调架构，支持持久订阅和非阻塞通知
          */
         class InterfaceServiceImpl final : public interfaces::InterfaceService::Service
         {
@@ -81,6 +85,12 @@ namespace humanoid_robot
                                      interfaces::UnsubscribeResponse *response) override;
 
         public:
+            /**
+             * 向指定订阅发布消息
+             * @param objectId 对象ID，用于匹配订阅
+             * @param eventType 事件类型，用于过滤订阅
+             * @param notification 要发送的通知消息
+             */
             void PublishMessage(const std::string &objectId, const std::string &eventType,
                                 const interfaces::Notification &notification);
 
@@ -93,6 +103,13 @@ namespace humanoid_robot
             void StartHeartbeatMonitor();
             void StopHeartbeatMonitor();
             void CheckHeartbeats();
+
+            /**
+             * 发送模拟通知消息
+             * 在独立线程中运行，发送10次测试消息到指定订阅
+             * @param subscriptionId 订阅ID
+             */
+            void SendSimulatedNotification(const std::string &subscriptionId);
         };
 
         /**
@@ -104,7 +121,7 @@ namespace humanoid_robot
             InterfacesServer();
             ~InterfacesServer();
 
-            // 启动服务器 (简化版本)
+            // 启动服务器
             bool Start(const std::string &server_address = "127.0.0.1:50051");
 
             // 停止服务器
@@ -116,7 +133,12 @@ namespace humanoid_robot
             // 获取服务实例（用于发布消息）
             InterfaceServiceImpl *GetService() { return service_.get(); }
 
-            // 示例：模拟发布消息
+            /**
+             * 模拟发布消息到匹配的订阅
+             * @param objectId 目标对象ID
+             * @param eventType 事件类型
+             * @param messageContent 消息内容
+             */
             void SimulatePublishMessage(const std::string &objectId, const std::string &eventType,
                                         const std::string &messageContent);
 

@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2025 Humanoid Robot, Inc. All rights reserved.
  *
- * Simple test - 参照Client-SDK模式
+ * Simple test - 多线程回调服务器快速测试
  */
 
 #include <iostream>
@@ -30,10 +30,10 @@ int main()
         }
 
         std::cout << "✅ Server started successfully!" << std::endl;
-        std::cout << "✅ All 8 RPC services ready:" << std::endl;
-        std::cout << "  ✓ Create, Send, Delete, Query" << std::endl;
-        std::cout << "  ✓ BatchCreate, HealthCheck" << std::endl;
-        std::cout << "  ✓ Subscribe (streaming), Unsubscribe" << std::endl;
+        std::cout << "✅ All RPC services ready:" << std::endl;
+        std::cout << "  ✓ Send, Query, Action (streaming)" << std::endl;
+        std::cout << "  ✓ Subscribe (with callback), Unsubscribe" << std::endl;
+        std::cout << "✅ Multi-threaded callback architecture enabled" << std::endl;
 
         std::cout << "\n🔗 Client-SDK可以连接到: " << server_address << std::endl;
 
