@@ -26,6 +26,9 @@
 #include "interfaces/interfaces_request_response.pb.h"
 #include "interfaces/interfaces_callback.grpc.pb.h"
 
+// 引入模块管理器
+#include "modules/module_manager.h"
+
 namespace humanoid_robot
 {
     namespace server
@@ -42,7 +45,7 @@ namespace humanoid_robot
             std::vector<std::string> eventTypes;
             int64_t heartbeatInterval;
             std::chrono::steady_clock::time_point lastHeartbeat;
-            std::unique_ptr<interfaces::ClientCallbackService::Stub> clientStub;
+            std::unique_ptr<humanoid_robot::PB::interfaces::ClientCallbackService::Stub> clientStub;
 
             PersistentSubscription(const std::string &subId, const std::string &objId,
                                    const std::string &endpoint, const std::vector<std::string> &events,
@@ -56,33 +59,32 @@ namespace humanoid_robot
          * InterfaceService服务实现类
          * 多线程回调架构，支持持久订阅和非阻塞通知
          */
-        class InterfaceServiceImpl final : public interfaces::InterfaceService::Service
+        class InterfaceServiceImpl final : public humanoid_robot::PB::interfaces::InterfaceService::Service
         {
         public:
             InterfaceServiceImpl();
             ~InterfaceServiceImpl();
 
-            // 基本CRUD操作
-            grpc::Status Send(grpc::ServerContext *context,
-                              const interfaces::SendRequest *request,
-                              interfaces::SendResponse *response) override;
+            // 同步操作
+            grpc::Status Send(::grpc::ServerContext *context,
+                              ::grpc::ServerReaderWriter<::humanoid_robot::PB::interfaces::SendResponse, ::humanoid_robot::PB::interfaces::SendRequest> *stream) override;
 
             grpc::Status Query(grpc::ServerContext *context,
-                               const interfaces::QueryRequest *request,
-                               interfaces::QueryResponse *response) override;
+                               const humanoid_robot::PB::interfaces::QueryRequest *request,
+                               humanoid_robot::PB::interfaces::QueryResponse *response) override;
 
             grpc::Status Action(::grpc::ServerContext *context,
-                                const ::interfaces::ActionRequest *request,
-                                ::grpc::ServerWriter<::interfaces::ActionResponse> *writer) override;
+                                const ::humanoid_robot::PB::interfaces::ActionRequest *request,
+                                ::grpc::ServerWriter<::humanoid_robot::PB::interfaces::ActionResponse> *writer) override;
 
-            // 流式服务
+            // 支持异步回调
             grpc::Status Subscribe(grpc::ServerContext *context,
-                                   const interfaces::SubscribeRequest *request,
-                                   interfaces::SubscribeResponse *response) override;
+                                   const humanoid_robot::PB::interfaces::SubscribeRequest *request,
+                                   humanoid_robot::PB::interfaces::SubscribeResponse *response) override;
 
             grpc::Status Unsubscribe(grpc::ServerContext *context,
-                                     const interfaces::UnsubscribeRequest *request,
-                                     interfaces::UnsubscribeResponse *response) override;
+                                     const humanoid_robot::PB::interfaces::UnsubscribeRequest *request,
+                                     humanoid_robot::PB::interfaces::UnsubscribeResponse *response) override;
 
         public:
             /**
@@ -92,13 +94,16 @@ namespace humanoid_robot
              * @param notification 要发送的通知消息
              */
             void PublishMessage(const std::string &objectId, const std::string &eventType,
-                                const interfaces::Notification &notification);
+                                const humanoid_robot::PB::interfaces::Notification &notification);
 
         private:
             std::unordered_map<std::string, std::unique_ptr<PersistentSubscription>> subscriptions_;
             std::mutex subscriptions_mutex_;
             std::thread heartbeat_thread_;
             bool running_;
+
+            // 模块管理器
+            std::unique_ptr<modules::ModuleManager> module_manager_;
 
             void StartHeartbeatMonitor();
             void StopHeartbeatMonitor();

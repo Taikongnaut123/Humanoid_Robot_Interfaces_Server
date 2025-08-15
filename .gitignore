@@ -4,3 +4,5 @@
 !include
 !CMakeLists.txt
 !README.md
+!source/modules
+!include/modules

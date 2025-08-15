@@ -7,12 +7,20 @@
  * - 多线程回调机制，避免阻塞主服务
  * - 线程安全的订阅存储和访问
  * - 支持多种参数名兼容性（client_endpoint/callbackurl）
+ * - 基于命令ID的多模块架构支持
  */
 
 #include "interfaces_server.h"
+#include "modules/module_manager.h"
 #include <iostream>
 #include <chrono>
+#include "Log/wlog.hpp"
 #include <algorithm>
+#include "grpc/status.h"
+
+using namespace humanoid_robot::PB::interfaces;
+using namespace humanoid_robot::PB::common;
+using namespace grpc;
 
 namespace humanoid_robot
 {
@@ -25,91 +33,259 @@ namespace humanoid_robot
 
         InterfaceServiceImpl::InterfaceServiceImpl() : running_(false)
         {
+            // 创建模块管理器
+            module_manager_ = std::make_unique<modules::ModuleManager>();
+
+            // 启动所有模块
+            if (!module_manager_->StartAllModules())
+            {
+                std::cerr << "Failed to start all modules" << std::endl;
+            }
+            else
+            {
+                std::cout << "All modules started successfully" << std::endl;
+            }
+
             StartHeartbeatMonitor();
         }
 
         InterfaceServiceImpl::~InterfaceServiceImpl()
         {
             StopHeartbeatMonitor();
+
+            // 停止所有模块
+            if (module_manager_)
+            {
+                module_manager_->StopAllModules();
+                std::cout << "All modules stopped" << std::endl;
+            }
         }
 
-        grpc::Status InterfaceServiceImpl::Send(grpc::ServerContext *context,
-                                                const interfaces::SendRequest *request,
-                                                interfaces::SendResponse *response)
+        grpc::Status InterfaceServiceImpl::Send(::grpc::ServerContext *context,
+                                                ::grpc::ServerReaderWriter<::humanoid_robot::PB::interfaces::SendResponse, ::humanoid_robot::PB::interfaces::SendRequest> *stream)
         {
-            std::cout << "Support Send service" << std::endl;
-            auto output_map = response->mutable_output()->mutable_keyvaluelist();
+            std::cout << "Send service called" << std::endl;
+
+            if (stream == nullptr)
             {
-                base_types::Variant var;
-                var.set_stringvalue("send request success");
-                output_map->insert({"status_desc", var});
+                WLOG_ERROR("Stream is null");
+                return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "Stream is null");
             }
+            SendRequest request;
+            if (stream->Read(&request))
             {
-                base_types::Variant var;
-                var.set_int32value(0); // 0表示成功
-                output_map->insert({"status_code", var});
-            }
-            {
-                base_types::Variant var;
-                var.set_stringvalue("Send service executed successfully");
-                output_map->insert({"message", var});
+                auto &inputMap = request.input().keyvaluelist();
+                auto iter = inputMap.find("commandID");
+                if (iter == inputMap.end())
+                {
+                    WLOG_ERROR("send input map not contain commandID");
+                    return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "commandID not exist");
+                }
+                if (iter->second.type() != humanoid_robot::PB::common::Variant_Type_KInt32Value)
+                {
+                    WLOG_ERROR("send input map's commandID type is invalid, expect(%d), actual(%d)",
+                               humanoid_robot::PB::common::Variant_Type_KInt32Value, iter->second.type());
+                    return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "commandID type is invalid");
+                }
+                auto commandID = iter->second.int32value();
+                iter = inputMap.find("data");
+                if (iter == inputMap.end())
+                {
+                    WLOG_ERROR("send input map not contain data");
+                    return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "data not exist");
+                }
+                auto data = iter->second.dictvalue();
+                auto params = request.params();
+                auto result = module_manager_->ExecuteCommand(context, commandID, data,
+                                                              params, 10000);
+                SendResponse response;
+                response.mutable_output()->CopyFrom(*result.output_data);
+                stream->Write(std::move(response));
             }
 
             return grpc::Status::OK;
         }
 
         grpc::Status InterfaceServiceImpl::Query(grpc::ServerContext *context,
-                                                 const interfaces::QueryRequest *request,
-                                                 interfaces::QueryResponse *response)
+                                                 const humanoid_robot::PB::interfaces::QueryRequest *request,
+                                                 humanoid_robot::PB::interfaces::QueryResponse *response)
         {
-            std::cout << "Support Query service" << std::endl;
-            auto output_map = response->mutable_output()->mutable_keyvaluelist();
-            {
-                base_types::Variant var;
-                var.set_stringvalue("query request success");
-                output_map->insert({"status_desc", var});
-            }
-            {
-                base_types::Variant var;
-                var.set_int32value(0); // 示例返回查询结果
-                output_map->insert({"status_code", var});
-            }
-            {
-                base_types::Variant var;
-                var.set_int32value(1); // 示例返回1条记录
-                output_map->insert({"count", var});
-            }
-            {
-                base_types::Variant var;
-                var.set_stringvalue("Query service executed successfully");
-                output_map->insert({"message", var});
-            }
+            // std::cout << "Query service called" << std::endl;
+
+            // auto output_map = response->mutable_output()->mutable_keyvaluelist();
+
+            // // 检查模块管理器是否可用
+            // if (!module_manager_)
+            // {
+            //     {
+            //         Variant var;
+            //         var.set_stringvalue("Module manager not available");
+            //         output_map->insert({"status_desc", var});
+            //     }
+            //     {
+            //         Variant var;
+            //         var.set_int32value(-1);
+            //         output_map->insert({"status_code", var});
+            //     }
+            //     return grpc::Status::OK;
+            // }
+
+            // // 从请求中提取查询类型
+            // const auto &input_map = request->input().keyvaluelist();
+            // auto query_it = input_map.find("query_type");
+
+            // if (query_it != input_map.end())
+            // {
+            //     std::string query_type = query_it->second.stringvalue();
+            //     std::cout << "Query type: " << query_type << std::endl;
+
+            //     if (query_type == "module_status")
+            //     {
+            //         // 查询模块状态
+            //         auto module_name_it = input_map.find("module_name");
+            //         if (module_name_it != input_map.end())
+            //         {
+            //             // 查询特定模块状态
+            //             std::string module_name = module_name_it->second.stringvalue();
+            //             auto status = module_manager_->GetModuleStatus(module_name);
+
+            //             if (status)
+            //             {
+            //                 const auto &status_map = status->keyvaluelist();
+            //                 for (const auto &[key, value] : status_map)
+            //                 {
+            //                     output_map->insert({key, value});
+            //                 }
+            //             }
+            //             else
+            //             {
+            //                 {
+            //                     Variant var;
+            //                     var.set_stringvalue("Module not found: " + module_name);
+            //                     output_map->insert({"status_desc", var});
+            //                 }
+            //                 {
+            //                     Variant var;
+            //                     var.set_int32value(-3);
+            //                     output_map->insert({"status_code", var});
+            //                 }
+            //                 return grpc::Status::OK;
+            //             }
+            //         }
+            //         else
+            //         {
+            //             // 查询所有模块状态
+            //             auto all_status = module_manager_->GetAllModulesStatus();
+            //             if (all_status)
+            //             {
+            //                 const auto &all_status_map = all_status->keyvaluelist();
+            //                 for (const auto &[key, value] : all_status_map)
+            //                 {
+            //                     output_map->insert({key, value});
+            //                 }
+            //             }
+            //         }
+            //     }
+            //     else if (query_type == "supported_commands")
+            //     {
+            //         // 查询支持的命令列表
+            //         auto commands = module_manager_->GetSupportedCommands();
+            //         if (commands)
+            //         {
+            //             const auto &commands_map = commands->keyvaluelist();
+            //             for (const auto &[key, value] : commands_map)
+            //             {
+            //                 output_map->insert({key, value});
+            //             }
+            //         }
+            //     }
+            //     else
+            //     {
+            //         // 尝试将查询作为命令执行
+            //         auto input_data = std::make_unique<Dictionary>();
+            //         *input_data = request->input();
+
+            //         auto params = std::make_unique<Dictionary>();
+            //         *params = request->params();
+
+            //         auto result = module_manager_->ExecuteCommand(context, query_type, std::move(input_data),
+            //                                                       std::move(params), 10000);
+
+            //         if (result.success && result.output_data)
+            //         {
+            //             const auto &module_output = result.output_data->keyvaluelist();
+            //             for (const auto &[key, value] : module_output)
+            //             {
+            //                 output_map->insert({key, value});
+            //             }
+            //         }
+            //         else
+            //         {
+            //             {
+            //                 Variant var;
+            //                 var.set_stringvalue("Unknown query type: " + query_type);
+            //                 output_map->insert({"status_desc", var});
+            //             }
+            //             {
+            //                 Variant var;
+            //                 var.set_int32value(-2);
+            //                 output_map->insert({"status_code", var});
+            //             }
+            //             return grpc::Status::OK;
+            //         }
+            //     }
+            // }
+            // else
+            // {
+            //     // 默认返回系统状态
+            //     auto all_status = module_manager_->GetAllModulesStatus();
+            //     if (all_status)
+            //     {
+            //         const auto &all_status_map = all_status->keyvaluelist();
+            //         for (const auto &[key, value] : all_status_map)
+            //         {
+            //             output_map->insert({key, value});
+            //         }
+            //     }
+            // }
+
+            // // 成功响应
+            // {
+            //     Variant var;
+            //     var.set_stringvalue("Query executed successfully");
+            //     output_map->insert({"status_desc", var});
+            // }
+            // {
+            //     Variant var;
+            //     var.set_int32value(0);
+            //     output_map->insert({"status_code", var});
+            // }
 
             return grpc::Status::OK;
         }
 
         grpc::Status InterfaceServiceImpl::Action(::grpc::ServerContext *context,
-                                                  const ::interfaces::ActionRequest *request,
-                                                  ::grpc::ServerWriter<::interfaces::ActionResponse> *writer)
+                                                  const humanoid_robot::PB::interfaces::ActionRequest *request,
+                                                  ::grpc::ServerWriter<::humanoid_robot::PB::interfaces::ActionResponse> *writer)
         {
             std::cout << "Support Action service" << std::endl;
 
             for (int i = 0; i < 3; ++i)
             {
-                ::interfaces::ActionResponse response;
+                humanoid_robot::PB::interfaces::ActionResponse response;
                 auto output = response.mutable_output()->mutable_keyvaluelist();
                 {
-                    base_types::Variant var;
+                    Variant var;
                     var.set_int32value(i + 1); // 示例使用整数值
                     output->insert({"action_id", var});
                 }
                 {
-                    base_types::Variant var;
+                    Variant var;
                     var.set_stringvalue("action " + std::to_string(i + 1)); // 示例使用字符串值
                     output->insert({"action_name", var});
                 }
                 {
-                    base_types::Variant var;
+                    Variant var;
                     var.set_stringvalue("Action service executed successfully - action " + std::to_string(i + 1));
                     output->insert({"message", var});
                 }
@@ -124,8 +300,8 @@ namespace humanoid_robot
         }
 
         grpc::Status InterfaceServiceImpl::Subscribe(grpc::ServerContext *context,
-                                                     const interfaces::SubscribeRequest *request,
-                                                     interfaces::SubscribeResponse *response)
+                                                     const humanoid_robot::PB::interfaces::SubscribeRequest *request,
+                                                     humanoid_robot::PB::interfaces::SubscribeResponse *response)
         {
             std::cout << "Subscribe service called" << std::endl;
 
@@ -235,7 +411,7 @@ namespace humanoid_robot
 
             // 创建客户端stub
             auto channel = grpc::CreateChannel(clientEndpoint, grpc::InsecureChannelCredentials());
-            subscription->clientStub = interfaces::ClientCallbackService::NewStub(channel);
+            subscription->clientStub = ClientCallbackService::NewStub(channel);
 
             // 存储订阅
             {
@@ -247,17 +423,17 @@ namespace humanoid_robot
             // 返回订阅信息给客户端
             auto output_map = response->mutable_output()->mutable_keyvaluelist();
             {
-                base_types::Variant var;
+                Variant var;
                 var.set_stringvalue(subscriptionId);
                 output_map->insert({"subscription_id", var});
             }
             {
-                base_types::Variant var;
+                Variant var;
                 var.set_stringvalue("Subscription created successfully");
                 output_map->insert({"status_desc", var});
             }
             {
-                base_types::Variant var;
+                Variant var;
                 var.set_int32value(0); // 0表示成功
                 output_map->insert({"status_code", var});
             }
@@ -272,8 +448,8 @@ namespace humanoid_robot
         }
 
         grpc::Status InterfaceServiceImpl::Unsubscribe(grpc::ServerContext *context,
-                                                       const interfaces::UnsubscribeRequest *request,
-                                                       interfaces::UnsubscribeResponse *response)
+                                                       const humanoid_robot::PB::interfaces::UnsubscribeRequest *request,
+                                                       humanoid_robot::PB::interfaces::UnsubscribeResponse *response)
         {
             std::cout << "Unsubscribe service called for subscription" << std::endl;
             auto &input_map = request->input().keyvaluelist();
@@ -284,12 +460,12 @@ namespace humanoid_robot
             {
                 std::cout << "No subscription_id provided, cannot unsubscribe" << std::endl;
                 {
-                    base_types::Variant var;
+                    Variant var;
                     var.set_stringvalue("No subscription_id provided");
                     output_map->insert({"status_desc", var});
                 }
                 {
-                    base_types::Variant var;
+                    Variant var;
                     var.set_int32value(-0600010001); // 错误码：缺少订阅ID参数
                     output_map->insert({"status_code", var});
                 }
@@ -307,17 +483,17 @@ namespace humanoid_robot
                 }
             }
             {
-                base_types::Variant var;
+                Variant var;
                 var.set_stringvalue("Persistent subscription removed: " + subscriptionId);
                 output_map->insert({"status_desc", var});
             }
             {
-                base_types::Variant var;
+                Variant var;
                 var.set_int32value(0); // 0表示成功
                 output_map->insert({"status_code", var});
             }
             {
-                base_types::Variant var;
+                Variant var;
                 var.set_stringvalue("Unsubscribe service executed successfully");
                 output_map->insert({"message", var});
             }
@@ -325,7 +501,7 @@ namespace humanoid_robot
         }
 
         void InterfaceServiceImpl::PublishMessage(const std::string &objectId, const std::string &eventType,
-                                                  const interfaces::Notification &notification)
+                                                  const humanoid_robot::PB::interfaces::Notification &notification)
         {
             std::lock_guard<std::mutex> lock(subscriptions_mutex_);
 
@@ -340,7 +516,7 @@ namespace humanoid_robot
                     {
                         // 发送消息到客户端
                         grpc::ClientContext context;
-                        interfaces::NotificationAck response;
+                        NotificationAck response;
 
                         auto status = subscription->clientStub->OnSubscriptionMessage(&context, notification, &response);
 
@@ -430,31 +606,31 @@ namespace humanoid_robot
                 std::cout << "Send count: " << sendCount + 1 << std::endl;
                 sendCount++;
                 // 创建模拟通知消息
-                interfaces::Notification notification;
+                Notification notification;
                 auto message = notification.mutable_notifymessage()->mutable_keyvaluelist();
 
                 {
-                    base_types::Variant var;
+                    Variant var;
                     var.set_stringvalue("subscription_callback : " + std::to_string(sendCount));
                     message->insert({"event_type", var});
                 }
                 {
-                    base_types::Variant var;
+                    Variant var;
                     var.set_stringvalue(subscriptionId);
                     message->insert({"subscription_id", var});
                 }
                 {
-                    base_types::Variant var;
+                    Variant var;
                     var.set_stringvalue("Hello from server! This is a simulated notification message.");
                     message->insert({"message_content", var});
                 }
                 {
-                    base_types::Variant var;
+                    Variant var;
                     var.set_stringvalue("robot_001");
                     message->insert({"object_id", var});
                 }
                 {
-                    base_types::Variant var;
+                    Variant var;
                     auto timestamp = var.mutable_timestampvalue();
                     timestamp->set_seconds(std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()));
                     timestamp->set_nanos(0);
@@ -463,7 +639,7 @@ namespace humanoid_robot
 
                 // 发送通知到客户端
                 grpc::ClientContext context;
-                interfaces::NotificationAck response;
+                NotificationAck response;
 
                 std::cout << "Sending simulated notification to client endpoint: "
                           << subscription->clientEndpoint << std::endl;
@@ -552,32 +728,32 @@ namespace humanoid_robot
                                                       const std::string &messageContent)
         {
             // 创建通知消息，使用传入的参数而不是硬编码值
-            interfaces::Notification notification;
+            Notification notification;
             auto message = notification.mutable_notifymessage()->mutable_keyvaluelist();
             {
-                base_types::Variant var;
+                Variant var;
                 var.set_stringvalue(objectId);
                 message->insert({"objectid", var});
             }
             {
-                base_types::Variant var;
+                Variant var;
                 var.set_stringvalue(eventType);
                 message->insert({"event_type", var});
             }
             {
-                base_types::Variant var;
+                Variant var;
                 var.set_stringvalue(messageContent);
                 message->insert({"message_content", var});
             }
             {
-                base_types::Variant var;
+                Variant var;
                 auto timestamp = var.mutable_timestampvalue();
                 timestamp->set_seconds(std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()));
                 timestamp->set_nanos(0);
                 message->insert({"timestamp", var});
             }
             {
-                base_types::Variant var;
+                Variant var;
                 var.set_stringvalue("msg_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count()));
                 message->insert({"messageid", var});
             }
