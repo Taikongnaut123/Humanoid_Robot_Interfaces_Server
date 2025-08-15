@@ -71,9 +71,17 @@ namespace humanoid_robot
                 WLOG_ERROR("Stream is null");
                 return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "Stream is null");
             }
+            // context->
             SendRequest request;
+            // 读取请求数据
             if (stream->Read(&request))
             {
+                // 检查上下文是否被取消
+                if (context->IsCancelled())
+                {
+                    return grpc::Status(grpc::StatusCode::DEADLINE_EXCEEDED, "Stream timeout");
+                }
+                // 解析请求中的 commandID 和 data
                 auto &inputMap = request.input().keyvaluelist();
                 auto iter = inputMap.find("commandID");
                 if (iter == inputMap.end())
@@ -96,11 +104,22 @@ namespace humanoid_robot
                 }
                 auto data = iter->second.dictvalue();
                 auto params = request.params();
+                // 调用模块管理器执行命令
                 auto result = module_manager_->ExecuteCommand(context, commandID, data,
                                                               params, 10000);
                 SendResponse response;
+                // 填充响应数据
                 response.mutable_output()->CopyFrom(*result.output_data);
-                stream->Write(std::move(response));
+                // 写入响应数据
+                if (stream->Write(std::move(response)))
+                {
+                    WLOG_DEBUG("Response sent successfully");
+                }
+                else
+                {
+                    WLOG_ERROR("Failed to send response");
+                    return grpc::Status(grpc::StatusCode::UNKNOWN, "Failed to send response");
+                }
             }
 
             return grpc::Status::OK;
@@ -110,157 +129,39 @@ namespace humanoid_robot
                                                  const humanoid_robot::PB::interfaces::QueryRequest *request,
                                                  humanoid_robot::PB::interfaces::QueryResponse *response)
         {
-            // std::cout << "Query service called" << std::endl;
+            WLOG_DEBUG("Query service called");
+            auto &inputMap = request->input().keyvaluelist();
 
-            // auto output_map = response->mutable_output()->mutable_keyvaluelist();
-
-            // // 检查模块管理器是否可用
-            // if (!module_manager_)
-            // {
-            //     {
-            //         Variant var;
-            //         var.set_stringvalue("Module manager not available");
-            //         output_map->insert({"status_desc", var});
-            //     }
-            //     {
-            //         Variant var;
-            //         var.set_int32value(-1);
-            //         output_map->insert({"status_code", var});
-            //     }
-            //     return grpc::Status::OK;
-            // }
-
-            // // 从请求中提取查询类型
-            // const auto &input_map = request->input().keyvaluelist();
-            // auto query_it = input_map.find("query_type");
-
-            // if (query_it != input_map.end())
-            // {
-            //     std::string query_type = query_it->second.stringvalue();
-            //     std::cout << "Query type: " << query_type << std::endl;
-
-            //     if (query_type == "module_status")
-            //     {
-            //         // 查询模块状态
-            //         auto module_name_it = input_map.find("module_name");
-            //         if (module_name_it != input_map.end())
-            //         {
-            //             // 查询特定模块状态
-            //             std::string module_name = module_name_it->second.stringvalue();
-            //             auto status = module_manager_->GetModuleStatus(module_name);
-
-            //             if (status)
-            //             {
-            //                 const auto &status_map = status->keyvaluelist();
-            //                 for (const auto &[key, value] : status_map)
-            //                 {
-            //                     output_map->insert({key, value});
-            //                 }
-            //             }
-            //             else
-            //             {
-            //                 {
-            //                     Variant var;
-            //                     var.set_stringvalue("Module not found: " + module_name);
-            //                     output_map->insert({"status_desc", var});
-            //                 }
-            //                 {
-            //                     Variant var;
-            //                     var.set_int32value(-3);
-            //                     output_map->insert({"status_code", var});
-            //                 }
-            //                 return grpc::Status::OK;
-            //             }
-            //         }
-            //         else
-            //         {
-            //             // 查询所有模块状态
-            //             auto all_status = module_manager_->GetAllModulesStatus();
-            //             if (all_status)
-            //             {
-            //                 const auto &all_status_map = all_status->keyvaluelist();
-            //                 for (const auto &[key, value] : all_status_map)
-            //                 {
-            //                     output_map->insert({key, value});
-            //                 }
-            //             }
-            //         }
-            //     }
-            //     else if (query_type == "supported_commands")
-            //     {
-            //         // 查询支持的命令列表
-            //         auto commands = module_manager_->GetSupportedCommands();
-            //         if (commands)
-            //         {
-            //             const auto &commands_map = commands->keyvaluelist();
-            //             for (const auto &[key, value] : commands_map)
-            //             {
-            //                 output_map->insert({key, value});
-            //             }
-            //         }
-            //     }
-            //     else
-            //     {
-            //         // 尝试将查询作为命令执行
-            //         auto input_data = std::make_unique<Dictionary>();
-            //         *input_data = request->input();
-
-            //         auto params = std::make_unique<Dictionary>();
-            //         *params = request->params();
-
-            //         auto result = module_manager_->ExecuteCommand(context, query_type, std::move(input_data),
-            //                                                       std::move(params), 10000);
-
-            //         if (result.success && result.output_data)
-            //         {
-            //             const auto &module_output = result.output_data->keyvaluelist();
-            //             for (const auto &[key, value] : module_output)
-            //             {
-            //                 output_map->insert({key, value});
-            //             }
-            //         }
-            //         else
-            //         {
-            //             {
-            //                 Variant var;
-            //                 var.set_stringvalue("Unknown query type: " + query_type);
-            //                 output_map->insert({"status_desc", var});
-            //             }
-            //             {
-            //                 Variant var;
-            //                 var.set_int32value(-2);
-            //                 output_map->insert({"status_code", var});
-            //             }
-            //             return grpc::Status::OK;
-            //         }
-            //     }
-            // }
-            // else
-            // {
-            //     // 默认返回系统状态
-            //     auto all_status = module_manager_->GetAllModulesStatus();
-            //     if (all_status)
-            //     {
-            //         const auto &all_status_map = all_status->keyvaluelist();
-            //         for (const auto &[key, value] : all_status_map)
-            //         {
-            //             output_map->insert({key, value});
-            //         }
-            //     }
-            // }
-
-            // // 成功响应
-            // {
-            //     Variant var;
-            //     var.set_stringvalue("Query executed successfully");
-            //     output_map->insert({"status_desc", var});
-            // }
-            // {
-            //     Variant var;
-            //     var.set_int32value(0);
-            //     output_map->insert({"status_code", var});
-            // }
-
+            auto iter = inputMap.find("commandID");
+            if (iter == inputMap.end())
+            {
+                WLOG_ERROR("query input map not contain commandID");
+                return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "commandID not exist");
+            }
+            if (iter->second.type() != humanoid_robot::PB::common::Variant_Type_KInt32Value)
+            {
+                WLOG_ERROR("query input map's commandID type is invalid, expect(%d), actual(%d)",
+                           humanoid_robot::PB::common::Variant_Type_KInt32Value, iter->second.type());
+                return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "commandID type is invalid");
+            }
+            auto commandID = iter->second.int32value();
+            iter = inputMap.find("data");
+            if (iter == inputMap.end())
+            {
+                WLOG_ERROR("query input map not contain data");
+                return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "data not exist");
+            }
+            auto data = iter->second.dictvalue();
+            auto params = request->params();
+            // 调用模块管理器执行查询
+            auto result = module_manager_->ExecuteCommand(context, commandID, data, params, 10000);
+            // 填充响应数据
+            auto outputMap = response->mutable_output()->mutable_keyvaluelist();
+            for (const auto &pair : result.output_data->keyvaluelist())
+            {
+                (*outputMap)[pair.first] = pair.second;
+            }
+            WLOG_DEBUG("Query service called end");
             return grpc::Status::OK;
         }
 
@@ -268,34 +169,36 @@ namespace humanoid_robot
                                                   const humanoid_robot::PB::interfaces::ActionRequest *request,
                                                   ::grpc::ServerWriter<::humanoid_robot::PB::interfaces::ActionResponse> *writer)
         {
-            std::cout << "Support Action service" << std::endl;
+            WLOG_DEBUG("Action service called");
 
-            for (int i = 0; i < 3; ++i)
+            auto &inputMap = request->input().keyvaluelist();
+            auto iter = inputMap.find("commandID");
+            if (iter == inputMap.end())
             {
-                humanoid_robot::PB::interfaces::ActionResponse response;
-                auto output = response.mutable_output()->mutable_keyvaluelist();
-                {
-                    Variant var;
-                    var.set_int32value(i + 1); // 示例使用整数值
-                    output->insert({"action_id", var});
-                }
-                {
-                    Variant var;
-                    var.set_stringvalue("action " + std::to_string(i + 1)); // 示例使用字符串值
-                    output->insert({"action_name", var});
-                }
-                {
-                    Variant var;
-                    var.set_stringvalue("Action service executed successfully - action " + std::to_string(i + 1));
-                    output->insert({"message", var});
-                }
-
-                if (!writer->Write(response))
-                {
-                    break;
-                }
+                WLOG_ERROR("query input map not contain commandID");
+                return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "commandID not exist");
             }
+            if (iter->second.type() != humanoid_robot::PB::common::Variant_Type_KInt32Value)
+            {
+                WLOG_ERROR("query input map's commandID type is invalid, expect(%d), actual(%d)",
+                           humanoid_robot::PB::common::Variant_Type_KInt32Value, iter->second.type());
+                return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "commandID type is invalid");
+            }
+            auto commandID = iter->second.int32value();
+            iter = inputMap.find("data");
+            if (iter == inputMap.end())
+            {
+                WLOG_ERROR("query input map not contain data");
+                return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "data not exist");
+            }
+            auto data = iter->second.dictvalue();
 
+            auto params = request->params();
+            // 调用模块管理器执行动作
+            auto result = module_manager_->ExecuteCommand(context, commandID, data, params,
+                                                          10000);
+
+            WLOG_DEBUG("Action service called end");
             return grpc::Status::OK;
         }
 
@@ -678,15 +581,32 @@ namespace humanoid_robot
         {
             try
             {
-                grpc::EnableDefaultHealthCheckService(true);
-                grpc::reflection::InitProtoReflectionServerBuilderPlugin();
 
                 grpc::ServerBuilder builder;
 
+                builder.AddChannelArgument(GRPC_ARG_MAX_CONNECTION_IDLE_MS, 600000);  // 设置最大连接空闲时间为60秒
+                builder.AddChannelArgument(GRPC_ARG_MAX_CONNECTION_AGE_MS, 1200000);  // 设置最大连接年龄为20分钟
+                builder.AddChannelArgument(GRPC_ARG_KEEPALIVE_TIME_MS, 30000);        // 设置keepalive时间为30秒
+                builder.AddChannelArgument(GRPC_ARG_KEEPALIVE_TIMEOUT_MS, 10000);     // 设置keepalive超时时e为10秒
+                builder.AddChannelArgument(GRPC_ARG_HTTP2_MAX_PINGS_WITHOUT_DATA, 5); // 设置最大无数据ping次数为5
+                builder.AddChannelArgument(GRPC_ARG_HTTP2_MIN_RECV_PING_INTERVAL_WITHOUT_DATA_MS, 10000);
+
+                builder.SetSyncServerOption(grpc::ServerBuilder::SyncServerOption::NUM_CQS, 4);             // 设置4个工作线程
+                builder.SetSyncServerOption(grpc::ServerBuilder::SyncServerOption::MAX_POLLERS, 4);         // 设置4个轮询器
+                builder.SetSyncServerOption(grpc::ServerBuilder::SyncServerOption::MIN_POLLERS, 1);         // 设置最小轮询器为1
+                builder.SetSyncServerOption(grpc::ServerBuilder::SyncServerOption::CQ_TIMEOUT_MSEC, 10000); // 设置CQ超时时间为10秒
+
+                // 4. 消息大小限制
+                builder.SetMaxReceiveMessageSize(4 * 1024 * 1024); // 4MB
+                builder.SetMaxSendMessageSize(4 * 1024 * 1024);    // 4MB
+
+                grpc::EnableDefaultHealthCheckService(true);
+                grpc::reflection::InitProtoReflectionServerBuilderPlugin();
                 // 加上复杂配置，使用健康检查和反射
                 builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
                 builder.RegisterService(service_.get());
-
+                // 启动gRPC服务器
+                WLOG_DEBUG("Starting gRPC server at ");
                 server_ = builder.BuildAndStart();
 
                 if (server_)
