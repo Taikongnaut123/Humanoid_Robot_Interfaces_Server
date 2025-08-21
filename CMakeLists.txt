@@ -19,3 +19,4 @@ set(INTERFACES_SERVER_EXAMPLES_DIR "${INTERFACES_SERVER_ROOT_PATH}/examples")
 # 添加子目录
 add_subdirectory(source)
 add_subdirectory(examples)
+add_subdirectory(service)
