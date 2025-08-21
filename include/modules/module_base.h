@@ -40,7 +40,7 @@ namespace humanoid_robot
                 int32_t command_id;
 
                 // 输出数据 (使用protobuf Dictionary格式)
-                std::shared_ptr<humanoid_robot::PB::common::Dictionary> output_data;
+                std::unique_ptr<humanoid_robot::PB::common::Dictionary> output_data;
 
                 ModuleResult() : success(false), error_code(-1) {}
 
