@@ -55,7 +55,7 @@ namespace humanoid_robot
             {
                 try
                 {
-                    std::string target = "localhost:52001"; // 5为默认，2为感知序列号，000-999为感知自行分配区间
+                    std::string target = "localhost:50052"; // 连接到perception_pipeline_cpp服务
                     pImpl_->target_ = target;
 
                     // Create gRPC channel with default credentials
@@ -70,6 +70,7 @@ namespace humanoid_robot
 
                     if (!pImpl_->channel_)
                     {
+                        std::cerr << "[Perception] Failed to create gRPC channel to " << target << std::endl;
                         return false;
                     }
 
@@ -78,14 +79,28 @@ namespace humanoid_robot
 
                     if (!pImpl_->stub_)
                     {
+                        std::cerr << "[Perception] Failed to create service stub" << std::endl;
                         return false;
                     }
 
-                    pImpl_->connected_ = true;
+                    // 测试连接
+                    auto deadline = std::chrono::system_clock::now() + std::chrono::seconds(5);
+                    if (pImpl_->channel_->WaitForConnected(deadline))
+                    {
+                        std::cout << "[Perception] Successfully connected to perception service at " << target << std::endl;
+                        pImpl_->connected_ = true;
+                    }
+                    else
+                    {
+                        std::cerr << "[Perception] Failed to connect to perception service at " << target << std::endl;
+                        return false;
+                    }
+
                     return true;
                 }
                 catch (const std::exception &e)
                 {
+                    std::cerr << "[Perception] Exception during initialization: " << e.what() << std::endl;
                     return false;
                 }
                 return true;
@@ -135,20 +150,115 @@ namespace humanoid_robot
                 const humanoid_robot::PB::common::Dictionary &input_data,
                 const humanoid_robot::PB::common::Dictionary &params)
             {
-                SimulateProcessingDelay(200, 800);
-                ::grpc::ClientContext context;
-                auto readwrite = pImpl_->stub_->GetPerceptionResult(&context);
+                if (!pImpl_->connected_ || !pImpl_->stub_)
+                {
+                    return ModuleResult::Error("Perception", GET_PERCEPTION_RESULT,
+                                               -1, "Perception service not connected");
+                }
 
-                // 模拟视觉检测结果
-                std::vector<std::pair<std::string, std::string>> detected_objects = {
-                    {"person", "human_1"},
-                    {"chair", "furniture_1"},
-                    {"table", "furniture_2"}};
-                ::humanoid_robot::PB::perception::Perception response;
-                auto result = readwrite->Read(&response);
-                Dictionary result_data;
-                return ModuleResult::Success("Perception", GET_PERCEPTION_RESULT,
-                                             std::make_unique<humanoid_robot::PB::common::Dictionary>(std::move(result_data)));
+                try
+                {
+                    // 从input_data中提取图像数据
+                    auto &kv_map = input_data.keyvaluelist();
+                    auto image_it = kv_map.find("image");
+                    if (image_it == kv_map.end())
+                    {
+                        return ModuleResult::Error("Perception", GET_PERCEPTION_RESULT,
+                                                   -2, "No image data provided");
+                    }
+
+                    // 构造图像请求
+                    humanoid_robot::PB::common::Image image_request;
+
+                    // 如果是Image类型的Variant
+                    if (image_it->second.value_case() == humanoid_robot::PB::common::Variant::KImageValue)
+                    {
+                        image_request = image_it->second.imagevalue();
+                    }
+                    else
+                    {
+                        // 假设是字符串格式的图像数据
+                        image_request.set_img(image_it->second.stringvalue());
+                        image_request.set_requiresmasks(true);
+
+                        // 设置时间戳
+                        auto now = std::chrono::system_clock::now();
+                        auto timestamp = std::chrono::duration_cast<std::chrono::microseconds>(
+                                             now.time_since_epoch())
+                                             .count();
+                        image_request.set_timestamp(std::to_string(timestamp));
+                    }
+
+                    // 创建客户端上下文并设置超时
+                    grpc::ClientContext context;
+                    auto deadline = std::chrono::system_clock::now() + std::chrono::seconds(10);
+                    context.set_deadline(deadline);
+
+                    // 调用GetPerceptionResult (流式接口)
+                    auto stream = pImpl_->stub_->GetPerceptionResult(&context);
+
+                    // 发送图像
+                    if (!stream->Write(image_request))
+                    {
+                        return ModuleResult::Error("Perception", GET_PERCEPTION_RESULT,
+                                                   -3, "Failed to send image to perception service");
+                    }
+
+                    // 完成写入
+                    stream->WritesDone();
+
+                    // 读取响应
+                    humanoid_robot::PB::perception::Perception response;
+                    std::vector<humanoid_robot::PB::perception::Perception> responses;
+
+                    while (stream->Read(&response))
+                    {
+                        responses.push_back(response);
+                    }
+
+                    // 检查状态
+                    grpc::Status status = stream->Finish();
+                    if (!status.ok())
+                    {
+                        return ModuleResult::Error("Perception", GET_PERCEPTION_RESULT,
+                                                   status.error_code(),
+                                                   "Perception service error: " + status.error_message());
+                    }
+
+                    // 构造返回结果
+                    auto result_data = std::make_unique<humanoid_robot::PB::common::Dictionary>();
+                    auto result_kv_map = result_data->mutable_keyvaluelist();
+
+                    // 添加检测结果数量
+                    {
+                        humanoid_robot::PB::common::Variant var;
+                        var.set_int32value(responses.size());
+                        result_kv_map->insert({"perception_count", var});
+                    }
+
+                    // 添加感知结果
+                    for (size_t i = 0; i < responses.size(); ++i)
+                    {
+                        std::string key = "perception_" + std::to_string(i);
+                        humanoid_robot::PB::common::Variant var;
+                        // var.set_type(humanoid_robot::PB::common::Variant::KPerceptionRowValue);
+
+                        // 这里需要根据实际的Perception消息结构来转换
+                        // 暂时用字符串表示
+                        var.set_stringvalue("perception_result_" + std::to_string(i));
+                        result_kv_map->insert({key, var});
+                    }
+
+                    std::cout << "[Perception] Successfully processed perception request, got "
+                              << responses.size() << " results" << std::endl;
+
+                    return ModuleResult::Success("Perception", GET_PERCEPTION_RESULT, std::move(result_data));
+                }
+                catch (const std::exception &e)
+                {
+                    return ModuleResult::Error("Perception", GET_PERCEPTION_RESULT,
+                                               -4, "Exception in perception processing: " + std::string(e.what()));
+                }
             }
 
             ModuleResult PerceptionModule::detect(
@@ -156,34 +266,132 @@ namespace humanoid_robot
                 const humanoid_robot::PB::common::Dictionary &input_data,
                 const humanoid_robot::PB::common::Dictionary &params)
             {
-                SimulateProcessingDelay(150, 600);
-
-                auto result_data = std::make_unique<humanoid_robot::PB::common::Dictionary>();
-                auto kv_map = result_data->mutable_keyvaluelist();
-
-                // 音频分析结果
+                WLOG_DEBUG("Processing detection command");
+                if (!pImpl_->connected_ || !pImpl_->stub_)
                 {
-                    humanoid_robot::PB::common::Variant var;
-                    var.set_stringvalue("speech");
-                    kv_map->insert({"audio_type", var});
-                }
-                {
-                    humanoid_robot::PB::common::Variant var;
-                    var.set_stringvalue("Hello, how are you?");
-                    kv_map->insert({"recognized_text", var});
-                }
-                {
-                    humanoid_robot::PB::common::Variant var;
-                    var.set_doublevalue(0.89);
-                    kv_map->insert({"confidence", var});
-                }
-                {
-                    humanoid_robot::PB::common::Variant var;
-                    var.set_stringvalue("english");
-                    kv_map->insert({"language", var});
+                    return ModuleResult::Error("Perception", GET_DETECTION_RESULT,
+                                               -1, "Perception service not connected");
                 }
 
-                return ModuleResult::Success("Perception", GET_DETECTION_RESULT, std::move(result_data));
+                try
+                {
+                    // 从input_data中提取图像数据
+                    auto &kv_map = input_data.keyvaluelist();
+                    auto image_it = kv_map.find("image");
+                    if (image_it == kv_map.end())
+                    {
+                        return ModuleResult::Error("Perception", GET_DETECTION_RESULT,
+                                                   -2, "No image data provided");
+                    }
+                    WLOG_DEBUG("Image data found in input_data");
+                    // 构造图像请求
+                    humanoid_robot::PB::common::Image image_request;
+
+                    // 如果是Image类型的Variant
+                    if (image_it->second.value_case() == humanoid_robot::PB::common::Variant::KImageValue)
+                    {
+                        image_request = image_it->second.imagevalue();
+                    }
+                    else
+                    {
+                        // 假设是字符串格式的图像数据
+                        image_request.set_img(image_it->second.bytevalue());
+                        WLOG_DEBUG("Image data set in image_request， image size : %d bytes",
+                                   image_request.img().size());
+                        image_request.set_requiresmasks(false); // 检测不需要masks
+
+                        // 设置时间戳
+                        auto now = std::chrono::system_clock::now();
+                        auto timestamp = std::chrono::duration_cast<std::chrono::microseconds>(
+                                             now.time_since_epoch())
+                                             .count();
+                        image_request.set_timestamp(std::to_string(timestamp));
+                    }
+
+                    // 创建客户端上下文并设置超时
+                    grpc::ClientContext context;
+                    auto deadline = std::chrono::system_clock::now() + std::chrono::seconds(10);
+                    context.set_deadline(deadline);
+
+                    // 调用GetDetectionResult
+                    humanoid_robot::PB::perception::Detection response;
+                    grpc::Status status = pImpl_->stub_->GetDetectionResult(&context, image_request, &response);
+
+                    if (!status.ok())
+                    {
+                        return ModuleResult::Error("Perception", GET_DETECTION_RESULT,
+                                                   status.error_code(),
+                                                   "Detection service error: " + status.error_message());
+                    }
+                    std::cout << "[Perception] Detection request processed successfully" << std::endl;
+                    // 构造返回结果
+                    auto result_data = std::make_unique<humanoid_robot::PB::common::Dictionary>();
+                    auto result_kv_map = result_data->mutable_keyvaluelist();
+                    auto response_timestamp = response.timestamp();
+                    auto response_rows_size = response.rows_size();
+                    auto response_rows = response.rows();
+                    std::cout << "[Perception] Response timestamp: " << response_timestamp << std::endl;
+                    std::cout << "[Perception] Response rows size: " << response_rows_size << std::endl;
+                    // 添加检测结果数量
+                    {
+                        humanoid_robot::PB::common::Variant var;
+                        var.set_int32value(response.rows_size());
+                        result_kv_map->insert({"rows_size", var});
+                    }
+
+                    // 添加检测结果
+                    for (int i = 0; i < response.rows_size(); ++i)
+                    {
+                        const auto &detection = response.rows(i);
+                        std::string prefix = "detection_" + std::to_string(i) + "_";
+
+                        // 检测框
+                        {
+                            humanoid_robot::PB::common::Variant var;
+                            // var.set_type(humanoid_robot::PB::common::Variant::KBBoxValue);
+                            *var.mutable_bboxvalue() = detection.bbox();
+                            result_kv_map->insert({prefix + "bbox", var});
+                        }
+
+                        // 跟踪ID
+                        {
+                            humanoid_robot::PB::common::Variant var;
+                            var.set_stringvalue(detection.trackid());
+                            result_kv_map->insert({prefix + "track_id", var});
+                        }
+
+                        // 置信度
+                        {
+                            humanoid_robot::PB::common::Variant var;
+                            var.set_doublevalue(detection.conf());
+                            result_kv_map->insert({prefix + "confidence", var});
+                        }
+
+                        // 类别
+                        {
+                            humanoid_robot::PB::common::Variant var;
+                            var.set_stringvalue(detection.cls());
+                            result_kv_map->insert({prefix + "class", var});
+                        }
+
+                        // 运动状态
+                        {
+                            humanoid_robot::PB::common::Variant var;
+                            var.set_boolvalue(detection.ismove());
+                            result_kv_map->insert({prefix + "is_moving", var});
+                        }
+                    }
+
+                    std::cout << "[Perception] Successfully processed detection request, got "
+                              << response.rows_size() << " detections" << std::endl;
+
+                    return ModuleResult::Success("Perception", GET_DETECTION_RESULT, std::move(result_data));
+                }
+                catch (const std::exception &e)
+                {
+                    return ModuleResult::Error("Perception", GET_DETECTION_RESULT,
+                                               -4, "Exception in detection processing: " + std::string(e.what()));
+                }
             }
 
             ModuleResult PerceptionModule::divide(
@@ -191,34 +399,143 @@ namespace humanoid_robot
                 const humanoid_robot::PB::common::Dictionary &input_data,
                 const humanoid_robot::PB::common::Dictionary &params)
             {
-                SimulateProcessingDelay(50, 200);
-
-                auto result_data = std::make_unique<humanoid_robot::PB::common::Dictionary>();
-                auto kv_map = result_data->mutable_keyvaluelist();
-
-                // 触觉感知结果
+                if (!pImpl_->connected_ || !pImpl_->stub_)
                 {
-                    humanoid_robot::PB::common::Variant var;
-                    var.set_doublevalue(25.6); // 温度
-                    kv_map->insert({"temperature", var});
-                }
-                {
-                    humanoid_robot::PB::common::Variant var;
-                    var.set_doublevalue(1.2); // 压力
-                    kv_map->insert({"pressure", var});
-                }
-                {
-                    humanoid_robot::PB::common::Variant var;
-                    var.set_stringvalue("smooth"); // 质地
-                    kv_map->insert({"texture", var});
-                }
-                {
-                    humanoid_robot::PB::common::Variant var;
-                    var.set_boolvalue(true); // 接触状态
-                    kv_map->insert({"contact", var});
+                    return ModuleResult::Error("Perception", GET_DIVISION_RESULT,
+                                               -1, "Perception service not connected");
                 }
 
-                return ModuleResult::Success("Perception", GET_DIVISION_RESULT, std::move(result_data));
+                try
+                {
+                    // 从input_data中提取图像数据
+                    auto &kv_map = input_data.keyvaluelist();
+                    auto image_it = kv_map.find("image");
+                    if (image_it == kv_map.end())
+                    {
+                        return ModuleResult::Error("Perception", GET_DIVISION_RESULT,
+                                                   -2, "No image data provided");
+                    }
+
+                    // 构造图像请求
+                    humanoid_robot::PB::common::Image image_request;
+
+                    // 如果是Image类型的Variant
+                    if (image_it->second.value_case() == humanoid_robot::PB::common::Variant::KImageValue)
+                    {
+                        image_request = image_it->second.imagevalue();
+                    }
+                    else
+                    {
+                        // 假设是字符串格式的图像数据
+                        image_request.set_img(image_it->second.stringvalue());
+                        image_request.set_requiresmasks(true); // 分割需要masks
+
+                        // 设置时间戳
+                        auto now = std::chrono::system_clock::now();
+                        auto timestamp = std::chrono::duration_cast<std::chrono::microseconds>(
+                                             now.time_since_epoch())
+                                             .count();
+                        image_request.set_timestamp(std::to_string(timestamp));
+                    }
+
+                    // 创建客户端上下文并设置超时
+                    grpc::ClientContext context;
+                    auto deadline = std::chrono::system_clock::now() + std::chrono::seconds(10);
+                    context.set_deadline(deadline);
+
+                    // 调用GetDivisionResult
+                    humanoid_robot::PB::perception::Division response;
+                    grpc::Status status = pImpl_->stub_->GetDivisionResult(&context, image_request, &response);
+
+                    if (!status.ok())
+                    {
+                        return ModuleResult::Error("Perception", GET_DIVISION_RESULT,
+                                                   status.error_code(),
+                                                   "Division service error: " + status.error_message());
+                    }
+
+                    // 构造返回结果
+                    auto result_data = std::make_unique<humanoid_robot::PB::common::Dictionary>();
+                    auto result_kv_map = result_data->mutable_keyvaluelist();
+
+                    // 添加分割结果数量
+                    {
+                        humanoid_robot::PB::common::Variant var;
+                        var.set_int32value(response.rows_size());
+                        result_kv_map->insert({"division_count", var});
+                    }
+
+                    // 添加分割结果
+                    for (int i = 0; i < response.rows_size(); ++i)
+                    {
+                        const auto &division = response.rows(i);
+                        std::string prefix = "division_" + std::to_string(i) + "_";
+
+                        // 跟踪ID
+                        {
+                            humanoid_robot::PB::common::Variant var;
+                            var.set_stringvalue(division.trackid());
+                            result_kv_map->insert({prefix + "track_id", var});
+                        }
+
+                        // 置信度
+                        {
+                            humanoid_robot::PB::common::Variant var;
+                            var.set_doublevalue(division.conf());
+                            result_kv_map->insert({prefix + "confidence", var});
+                        }
+
+                        // 类别
+                        {
+                            humanoid_robot::PB::common::Variant var;
+                            var.set_stringvalue(division.cls());
+                            result_kv_map->insert({prefix + "class", var});
+                        }
+
+                        // 运动状态
+                        {
+                            humanoid_robot::PB::common::Variant var;
+                            var.set_boolvalue(division.ismove());
+                            result_kv_map->insert({prefix + "is_moving", var});
+                        }
+
+                        // 分割掩码数量
+                        {
+                            humanoid_robot::PB::common::Variant var;
+                            var.set_int32value(division.masks_size());
+                            result_kv_map->insert({prefix + "mask_count", var});
+                        }
+
+                        // 分割掩码点
+                        for (int j = 0; j < division.masks_size(); ++j)
+                        {
+                            const auto &mask = division.masks(j);
+                            std::string mask_prefix = prefix + "mask_" + std::to_string(j) + "_";
+
+                            {
+                                humanoid_robot::PB::common::Variant var;
+                                var.set_int32value(mask.x());
+                                result_kv_map->insert({mask_prefix + "x", var});
+                            }
+
+                            {
+                                humanoid_robot::PB::common::Variant var;
+                                var.set_int32value(mask.y());
+                                result_kv_map->insert({mask_prefix + "y", var});
+                            }
+                        }
+                    }
+
+                    std::cout << "[Perception] Successfully processed division request, got "
+                              << response.rows_size() << " divisions" << std::endl;
+
+                    return ModuleResult::Success("Perception", GET_DIVISION_RESULT, std::move(result_data));
+                }
+                catch (const std::exception &e)
+                {
+                    return ModuleResult::Error("Perception", GET_DIVISION_RESULT,
+                                               -4, "Exception in division processing: " + std::string(e.what()));
+                }
             }
 
             void PerceptionModule::SimulateProcessingDelay(int min_ms, int max_ms) const

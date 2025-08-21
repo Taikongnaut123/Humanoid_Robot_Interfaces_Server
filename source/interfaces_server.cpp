@@ -89,10 +89,12 @@ namespace humanoid_robot
                     WLOG_ERROR("send input map not contain commandID");
                     return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "commandID not exist");
                 }
-                if (iter->second.type() != humanoid_robot::PB::common::Variant_Type_KInt32Value)
+                // Expect commandID as int32 stored in oneof int32Value
+                if (iter->second.value_case() != ::humanoid_robot::PB::common::Variant::kInt32Value)
                 {
                     WLOG_ERROR("send input map's commandID type is invalid, expect(%d), actual(%d)",
-                               humanoid_robot::PB::common::Variant_Type_KInt32Value, iter->second.type());
+                               static_cast<int>(::humanoid_robot::PB::common::Variant::kInt32Value),
+                               static_cast<int>(iter->second.value_case()));
                     return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "commandID type is invalid");
                 }
                 auto commandID = iter->second.int32value();
@@ -102,14 +104,28 @@ namespace humanoid_robot
                     WLOG_ERROR("send input map not contain data");
                     return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "data not exist");
                 }
-                auto data = iter->second.dictvalue();
-                auto params = request.params();
+                // Obtain mutable references to avoid copying MapField and merge issues
+                if (!iter->second.has_dictvalue())
+                {
+                    WLOG_ERROR("data does not contain dictvalue");
+                    return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "data type invalid");
+                }
+                auto data_ref = iter->second.dictvalue();
+                auto params_ptr = request.mutable_params();
                 // 调用模块管理器执行命令
-                auto result = module_manager_->ExecuteCommand(context, commandID, data,
-                                                              params, 10000);
+                auto result = module_manager_->ExecuteCommand(context, commandID, data_ref,
+                                                              *params_ptr, 10000);
                 SendResponse response;
                 // 填充响应数据
-                response.mutable_output()->CopyFrom(*result.output_data);
+                if (result.output_data)
+                {
+                    response.mutable_output()->Swap(result.output_data.get());
+                }
+                else
+                {
+                    WLOG_DEBUG("No output data from module, using default response");
+                    // 可选：设置默认/错误码
+                }
                 // 写入响应数据
                 if (stream->Write(std::move(response)))
                 {
@@ -138,10 +154,11 @@ namespace humanoid_robot
                 WLOG_ERROR("query input map not contain commandID");
                 return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "commandID not exist");
             }
-            if (iter->second.type() != humanoid_robot::PB::common::Variant_Type_KInt32Value)
+            if (iter->second.value_case() != ::humanoid_robot::PB::common::Variant::kInt32Value)
             {
                 WLOG_ERROR("query input map's commandID type is invalid, expect(%d), actual(%d)",
-                           humanoid_robot::PB::common::Variant_Type_KInt32Value, iter->second.type());
+                           static_cast<int>(::humanoid_robot::PB::common::Variant::kInt32Value),
+                           static_cast<int>(iter->second.value_case()));
                 return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "commandID type is invalid");
             }
             auto commandID = iter->second.int32value();
@@ -178,10 +195,11 @@ namespace humanoid_robot
                 WLOG_ERROR("query input map not contain commandID");
                 return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "commandID not exist");
             }
-            if (iter->second.type() != humanoid_robot::PB::common::Variant_Type_KInt32Value)
+            if (iter->second.value_case() != ::humanoid_robot::PB::common::Variant::kInt32Value)
             {
                 WLOG_ERROR("query input map's commandID type is invalid, expect(%d), actual(%d)",
-                           humanoid_robot::PB::common::Variant_Type_KInt32Value, iter->second.type());
+                           static_cast<int>(::humanoid_robot::PB::common::Variant::kInt32Value),
+                           static_cast<int>(iter->second.value_case()));
                 return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "commandID type is invalid");
             }
             auto commandID = iter->second.int32value();

@@ -15,13 +15,23 @@ target_include_directories(interfaces_server
     ${PB_INCLUDE_DIR}
 )
 
-# 链接库 (与Client-SDK保持一致的链接方式)
+# 使用特定的PB源文件而不是动态库，避免gRPC冲突
+set(PB_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../PB/source/interfaces/interfaces_grpc.grpc.pb.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../PB/source/interfaces/interfaces_request_response.pb.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../PB/source/interfaces/interfaces_callback.grpc.pb.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../PB/source/interfaces/interfaces_callback.pb.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../PB/source/common/variant.pb.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../PB/source/perception/perception_service.grpc.pb.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../PB/source/perception/perception_request_response.pb.cc
+)
+
+# 链接库 - 使用源文件而不是动态库
+target_sources(interfaces_server PRIVATE ${PB_SOURCES})
 target_link_libraries(interfaces_server
     PUBLIC
-    libinterfacesPB
-    libcommonPB
-    libperceptionPB
     protobuf::libprotobuf
     gRPC::grpc++
+    gRPC::grpc++_reflection
     PRIVATE CHRIC_Common_Log
 )
