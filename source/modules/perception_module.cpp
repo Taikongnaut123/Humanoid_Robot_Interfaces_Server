@@ -108,7 +108,7 @@ namespace humanoid_robot
 
             void PerceptionModule::Cleanup()
             {
-                std::cout << "[Perception] Cleaning up perception resources..." << std::endl;
+                WLOG_INFO("Cleaning up perception resources...");
 
                 pImpl_->stub_.reset();
                 pImpl_->channel_.reset();
@@ -121,7 +121,7 @@ namespace humanoid_robot
                 const humanoid_robot::PB::common::Dictionary &input_data,
                 const humanoid_robot::PB::common::Dictionary &params)
             {
-                std::cout << "[Perception] Processing command: " << command_id << std::endl;
+                WLOG_DEBUG("Processing command in PerceptionModule: %d", command_id);
 
                 if (command_id == GET_PERCEPTION_RESULT)
                 {
@@ -150,6 +150,7 @@ namespace humanoid_robot
                 const humanoid_robot::PB::common::Dictionary &input_data,
                 const humanoid_robot::PB::common::Dictionary &params)
             {
+                WLOG_DEBUG("Processing perception command");
                 if (!pImpl_->connected_ || !pImpl_->stub_)
                 {
                     return ModuleResult::Error("Perception", GET_PERCEPTION_RESULT,
@@ -178,7 +179,7 @@ namespace humanoid_robot
                     else
                     {
                         // 假设是字符串格式的图像数据
-                        image_request.set_img(image_it->second.stringvalue());
+                        image_request.set_img(image_it->second.bytevalue());
                         image_request.set_requiresmasks(true);
 
                         // 设置时间戳
@@ -247,6 +248,55 @@ namespace humanoid_robot
                         // 暂时用字符串表示
                         var.set_stringvalue("perception_result_" + std::to_string(i));
                         result_kv_map->insert({key, var});
+
+                        {
+                            auto timestamp = responses[i].timestamp();
+                            humanoid_robot::PB::common::Variant timestamp_var;
+                            timestamp_var.set_stringvalue(timestamp);
+                            result_kv_map->insert({"timestamp_" + std::to_string(i), timestamp_var});
+                        }
+
+                        {
+                            auto rows = responses[i].rows();
+                            for (auto row : rows)
+                            {
+                                {
+
+                                    auto bbox = row.bbox();
+                                    humanoid_robot::PB::common::Variant bbox_var;
+                                    // bbox_var.set_type(humanoid_robot::PB::common::Variant::KBBoxValue);
+                                    *bbox_var.mutable_bboxvalue() = bbox;
+                                    result_kv_map->insert({"bbox_" + std::to_string(i), bbox_var});
+                                }
+
+                                {
+                                    auto track_id = row.trackid();
+                                    humanoid_robot::PB::common::Variant track_id_var;
+                                    track_id_var.set_stringvalue(track_id);
+                                    result_kv_map->insert({"track_id_" + std::to_string(i), track_id_var});
+                                }
+
+                                {
+                                    auto conf = row.conf();
+                                    humanoid_robot::PB::common::Variant conf_var;
+                                    conf_var.set_floatvalue(conf);
+                                    result_kv_map->insert({"conf_" + std::to_string(i), conf_var});
+                                }
+
+                                {
+                                    auto cls = row.cls();
+                                    humanoid_robot::PB::common::Variant cls_var;
+                                    cls_var.set_stringvalue(cls);
+                                    result_kv_map->insert({"cls_" + std::to_string(i), cls_var});
+                                }
+                                {
+                                    auto ismove = row.ismove();
+                                    humanoid_robot::PB::common::Variant ismove_var;
+                                    ismove_var.set_boolvalue(ismove);
+                                    result_kv_map->insert({"ismove_" + std::to_string(i), ismove_var});
+                                }
+                            }
+                        }
                     }
 
                     std::cout << "[Perception] Successfully processed perception request, got "
@@ -399,6 +449,7 @@ namespace humanoid_robot
                 const humanoid_robot::PB::common::Dictionary &input_data,
                 const humanoid_robot::PB::common::Dictionary &params)
             {
+                WLOG_DEBUG("Processing division command");
                 if (!pImpl_->connected_ || !pImpl_->stub_)
                 {
                     return ModuleResult::Error("Perception", GET_DIVISION_RESULT,
@@ -412,10 +463,12 @@ namespace humanoid_robot
                     auto image_it = kv_map.find("image");
                     if (image_it == kv_map.end())
                     {
+                        WLOG_ERROR("No image data provided in input_data for division");
                         return ModuleResult::Error("Perception", GET_DIVISION_RESULT,
                                                    -2, "No image data provided");
                     }
 
+                    WLOG_DEBUG("Image data found in input_data for division");
                     // 构造图像请求
                     humanoid_robot::PB::common::Image image_request;
 
@@ -427,7 +480,7 @@ namespace humanoid_robot
                     else
                     {
                         // 假设是字符串格式的图像数据
-                        image_request.set_img(image_it->second.stringvalue());
+                        image_request.set_img(image_it->second.bytevalue());
                         image_request.set_requiresmasks(true); // 分割需要masks
 
                         // 设置时间戳
