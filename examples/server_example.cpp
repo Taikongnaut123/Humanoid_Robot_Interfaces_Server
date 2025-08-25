@@ -9,6 +9,7 @@
 #include <signal.h>
 #include <memory>
 #include "interfaces_server.h"
+#include "Log/wlog.hpp"
 
 using namespace humanoid_robot::server;
 
@@ -27,6 +28,9 @@ void SignalHandler(int signal)
 
 int main()
 {
+    // 初始化日志模块
+    WLogInit();
+
     // 设置信号处理
     signal(SIGINT, SignalHandler);
     signal(SIGTERM, SignalHandler);
@@ -64,5 +68,9 @@ int main()
     }
 
     std::cout << "Server shutdown completed." << std::endl;
+
+    // 停止日志模块
+    WLogStop();
+
     return 0;
 }

@@ -6,7 +6,10 @@ add_executable(server_example
 )
 
 target_link_libraries(server_example
+    PUBLIC
     interfaces_server
+    PRIVATE 
+    CHRIC_Common_Log
 )
 
 # 创建简单测试
@@ -15,5 +18,8 @@ add_executable(simple_test
 )
 
 target_link_libraries(simple_test
+    PUBLIC
     interfaces_server
+    PRIVATE 
+    CHRIC_Common_Log
 )

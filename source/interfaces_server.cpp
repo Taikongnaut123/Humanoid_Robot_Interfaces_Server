@@ -39,11 +39,11 @@ namespace humanoid_robot
             // 启动所有模块
             if (!module_manager_->StartAllModules())
             {
-                std::cerr << "Failed to start all modules" << std::endl;
+                WLOG_ERROR("Failed to start all modules");
             }
             else
             {
-                std::cout << "All modules started successfully" << std::endl;
+                WLOG_INFO("All modules started successfully");
             }
 
             StartHeartbeatMonitor();
@@ -57,14 +57,14 @@ namespace humanoid_robot
             if (module_manager_)
             {
                 module_manager_->StopAllModules();
-                std::cout << "All modules stopped" << std::endl;
+                WLOG_INFO("All modules stopped");
             }
         }
 
         grpc::Status InterfaceServiceImpl::Send(::grpc::ServerContext *context,
                                                 ::grpc::ServerReaderWriter<::humanoid_robot::PB::interfaces::SendResponse, ::humanoid_robot::PB::interfaces::SendRequest> *stream)
         {
-            std::cout << "Send service called" << std::endl;
+            WLOG_DEBUG("Send service called");
 
             if (stream == nullptr)
             {
@@ -224,7 +224,7 @@ namespace humanoid_robot
                                                      const humanoid_robot::PB::interfaces::SubscribeRequest *request,
                                                      humanoid_robot::PB::interfaces::SubscribeResponse *response)
         {
-            std::cout << "Subscribe service called" << std::endl;
+            WLOG_DEBUG("Subscribe service called");
 
             std::string subscriptionId;
             // 检查是否有传入的订阅ID，如果没有则基于object_id生成
@@ -233,7 +233,7 @@ namespace humanoid_robot
             if (it != input_map.end())
             {
                 subscriptionId = it->second.stringvalue();
-                std::cout << "Using provided subscription ID: " << subscriptionId << std::endl;
+                WLOG_DEBUG("Using provided subscription ID: %s", subscriptionId.c_str());
             }
             else
             {
@@ -241,7 +241,7 @@ namespace humanoid_robot
                 it = input_map.find("object_id");
                 if (it == input_map.end())
                 {
-                    std::cout << "No object_id provided, using default subscription ID" << std::endl;
+                    WLOG_DEBUG("No object_id provided, using default subscription ID");
                     subscriptionId = "sub_default_" + std::to_string(std::time(nullptr));
                 }
                 else
@@ -259,13 +259,13 @@ namespace humanoid_robot
                         subscriptionId = "sub_default_" + std::to_string(std::time(nullptr));
                     }
                 }
-                std::cout << "Generated subscription ID: " << subscriptionId << std::endl;
+                WLOG_DEBUG("Generated subscription ID: %s", subscriptionId.c_str());
             }
             std::vector<std::string> eventTypes;
             it = input_map.find("event_types");
             if (it == input_map.end())
             {
-                std::cout << "No event types provided, using default empty list" << std::endl;
+                WLOG_DEBUG("No event types provided, using default empty list");
                 eventTypes.push_back("default_event");
             }
             else
@@ -284,26 +284,26 @@ namespace humanoid_robot
                 it = input_map.find("callbackurl");
                 if (it == input_map.end())
                 {
-                    std::cerr << "No client endpoint provided (tried client_endpoint and callbackurl), cannot create subscription" << std::endl;
+                    WLOG_ERROR("No client endpoint provided (tried client_endpoint and callbackurl), cannot create subscription");
                     clientEndpoint = "localhost:50052"; // 使用默认值
                 }
                 else
                 {
                     clientEndpoint = it->second.stringvalue();
-                    std::cout << "Using fallback parameter callbackurl: " << clientEndpoint << std::endl;
+                    WLOG_DEBUG("Using fallback parameter callbackurl: %s", clientEndpoint.c_str());
                 }
             }
             else
             {
                 clientEndpoint = it->second.stringvalue();
-                std::cout << "using passed Client endpoint: " << clientEndpoint << std::endl;
+                WLOG_DEBUG("Using passed Client endpoint: %s", clientEndpoint.c_str());
             }
 
             int64_t heartbeatInterval = 0;
             it = input_map.find("heartbeat_interval");
             if (it == input_map.end())
             {
-                std::cout << "No heartbeat interval provided, using default 10000 ms" << std::endl;
+                WLOG_DEBUG("No heartbeat interval provided, using default 10000 ms");
                 heartbeatInterval = 10000; // 默认10秒
             }
             else
@@ -339,7 +339,7 @@ namespace humanoid_robot
                 std::lock_guard<std::mutex> lock(subscriptions_mutex_);
                 subscriptions_[subscriptionId] = std::move(subscription);
             }
-            std::cout << "Persistent subscription created: " << subscriptionId << std::endl;
+            WLOG_DEBUG("Persistent subscription created: %s", subscriptionId.c_str());
 
             // 返回订阅信息给客户端
             auto output_map = response->mutable_output()->mutable_keyvaluelist();
@@ -372,14 +372,14 @@ namespace humanoid_robot
                                                        const humanoid_robot::PB::interfaces::UnsubscribeRequest *request,
                                                        humanoid_robot::PB::interfaces::UnsubscribeResponse *response)
         {
-            std::cout << "Unsubscribe service called for subscription" << std::endl;
+            WLOG_DEBUG("Unsubscribe service called for subscription");
             auto &input_map = request->input().keyvaluelist();
             auto output_map = response->mutable_output()->mutable_keyvaluelist();
 
             auto it = input_map.find("subscription_id");
             if (it == input_map.end())
             {
-                std::cout << "No subscription_id provided, cannot unsubscribe" << std::endl;
+                WLOG_DEBUG("No subscription_id provided, cannot unsubscribe");
                 {
                     Variant var;
                     var.set_stringvalue("No subscription_id provided");
@@ -400,7 +400,7 @@ namespace humanoid_robot
                 if (it != subscriptions_.end())
                 {
                     subscriptions_.erase(it);
-                    std::cout << "Persistent subscription removed: " << subscriptionId << std::endl;
+                    WLOG_DEBUG("Persistent subscription removed: %s", subscriptionId.c_str());
                 }
             }
             {
@@ -443,13 +443,12 @@ namespace humanoid_robot
 
                         if (status.ok())
                         {
-                            std::cout << "Message published to subscription: " << subId << std::endl;
+                            WLOG_DEBUG("Message published to subscription: %s", subId.c_str());
                             subscription->lastHeartbeat = std::chrono::steady_clock::now();
                         }
                         else
                         {
-                            std::cerr << "Failed to publish message to subscription: " << subId
-                                      << " Error: " << status.error_message() << std::endl;
+                            WLOG_ERROR("Failed to publish message to subscription: %s Error: %s", subId.c_str(), status.error_message().c_str());
                         }
                     }
                 }
@@ -492,7 +491,7 @@ namespace humanoid_robot
                 // 如果超过心跳间隔的2倍时间没有响应，认为客户端断开
                 if (elapsed > subscription->heartbeatInterval * 2)
                 {
-                    std::cout << "Subscription timeout, removing: " << subscription->subscriptionId << std::endl;
+                    WLOG_DEBUG("Subscription timeout, removing: %s", subscription->subscriptionId.c_str());
                     it = subscriptions_.erase(it);
                 }
                 else
@@ -508,14 +507,14 @@ namespace humanoid_robot
             auto it = subscriptions_.find(subscriptionId);
             if (it == subscriptions_.end())
             {
-                std::cerr << "Subscription not found: " << subscriptionId << std::endl;
+                WLOG_ERROR("Subscription not found: %s", subscriptionId.c_str());
                 return;
             }
 
             auto &subscription = it->second;
             if (!subscription->clientStub)
             {
-                std::cerr << "Client stub not available for subscription: " << subscriptionId << std::endl;
+                WLOG_ERROR("Client stub not available for subscription: %s", subscriptionId.c_str());
                 return;
             }
 
@@ -523,8 +522,8 @@ namespace humanoid_robot
             while (sendCount < 10) // 发送10次模拟通知消息
             {
                 std::this_thread::sleep_for(std::chrono::seconds(1)); // 每秒发送一次
-                std::cout << "Sending simulated notification for subscription: " << subscriptionId << std::endl;
-                std::cout << "Send count: " << sendCount + 1 << std::endl;
+                WLOG_DEBUG("Sending simulated notification for subscription: %s", subscriptionId.c_str());
+                WLOG_DEBUG("Send count: %d", sendCount + 1);
                 sendCount++;
                 // 创建模拟通知消息
                 Notification notification;
@@ -562,21 +561,21 @@ namespace humanoid_robot
                 grpc::ClientContext context;
                 NotificationAck response;
 
-                std::cout << "Sending simulated notification to client endpoint: "
-                          << subscription->clientEndpoint << std::endl;
+                WLOG_DEBUG("Sending simulated notification to client endpoint: %s",
+                           subscription->clientEndpoint.c_str());
 
                 grpc::Status status = subscription->clientStub->OnSubscriptionMessage(&context, notification, &response);
 
                 if (status.ok())
                 {
-                    std::cout << "Successfully sent notification to client for subscription: "
-                              << subscriptionId << std::endl;
-                    std::cout << "Client response return code: " << response.ret() << std::endl;
+                    WLOG_DEBUG("Successfully sent notification to client for subscription: %s",
+                               subscriptionId.c_str());
+                    WLOG_DEBUG("Client response return code: %d", response.ret());
                 }
                 else
                 {
-                    std::cerr << "Failed to send notification to client: "
-                              << status.error_code() << " - " << status.error_message() << std::endl;
+                    WLOG_ERROR("Failed to send notification to client: %d - %s",
+                               status.error_code(), status.error_message().c_str());
                 }
             }
         }
@@ -629,18 +628,18 @@ namespace humanoid_robot
 
                 if (server_)
                 {
-                    std::cout << "gRPC Server listening on " << server_address << std::endl;
+                    WLOG_DEBUG("gRPC Server listening on %s", server_address.c_str());
                     return true;
                 }
                 else
                 {
-                    std::cerr << "Failed to start gRPC server!" << std::endl;
+                    WLOG_ERROR("Failed to start gRPC server!");
                     return false;
                 }
             }
             catch (const std::exception &e)
             {
-                std::cerr << "Error starting server: " << e.what() << std::endl;
+                WLOG_ERROR("Error starting server: %s", e.what());
                 return false;
             }
         }
@@ -650,7 +649,7 @@ namespace humanoid_robot
             if (server_)
             {
                 server_->Shutdown();
-                std::cout << "gRPC Server stopped." << std::endl;
+                WLOG_DEBUG("gRPC Server stopped.");
             }
         }
 
@@ -696,9 +695,8 @@ namespace humanoid_robot
                 message->insert({"messageid", var});
             }
 
-            std::cout << "Publishing message for objectId: " << objectId
-                      << ", eventType: " << eventType
-                      << ", content: " << messageContent << std::endl;
+            WLOG_DEBUG("Publishing message for objectId: %s, eventType: %s, content: %s",
+                       objectId.c_str(), eventType.c_str(), messageContent.c_str());
 
             // 发布消息到匹配的订阅
             service_->PublishMessage(objectId, eventType, notification);

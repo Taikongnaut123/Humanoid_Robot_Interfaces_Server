@@ -13,6 +13,9 @@ target_include_directories(interfaces_server
     PUBLIC
     ${INTERFACES_SERVER_INCLUDE_DIR}
     ${PB_INCLUDE_DIR}
+
+    PRIVATE
+    CHRIC_Common_Log
 )
 
 # 使用特定的PB源文件而不是动态库，避免gRPC冲突
