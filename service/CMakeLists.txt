@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.8)
-set(TARGET_NAME SDK-Server)
-project(${TARGET_NAME})
+set(TARGET_NAME CHRIC_SDKServerService)
+project(${TARGET_NAME} VERSION 1.0.0.0 DESCRIPTION "SDK Server Service" LANGUAGES CXX)
 
 
 # 生成 Interfaces-Server 独立进程
@@ -44,7 +44,13 @@ target_link_libraries(${TARGET_NAME}
     protobuf::libprotobuf
     gRPC::grpc++
     gRPC::grpc++_reflection
-    PRIVATE CHRIC_Common_Log
+    PRIVATE CHRIC_CommonLog
 )
+
+set_target_properties(${TARGET_NAME}
+    PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${OUTPUT_BIN_DIR}
+)
+
 # 可选：安装规则
-install(TARGETS ${TARGET_NAME} DESTINATION ${OUTPUT_BIN_DIR})
+install(TARGETS ${TARGET_NAME} DESTINATION ${CHRIC_CLOUD_FOLDER})

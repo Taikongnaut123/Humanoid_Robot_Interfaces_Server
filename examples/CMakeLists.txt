@@ -7,9 +7,17 @@ add_executable(server_example
 
 target_link_libraries(server_example
     PUBLIC
-    interfaces_server
+    CHRIC_InterfaceServer
+    protobuf::libprotobuf
+    gRPC::grpc++
     PRIVATE 
-    CHRIC_Common_Log
+    CHRIC_CommonLog
+)
+
+target_include_directories(server_example
+    PRIVATE
+    ${INTERFACES_SERVER_INCLUDE_DIR}
+    ${PB_INCLUDE_DIR}
 )
 
 # 创建简单测试
@@ -19,7 +27,9 @@ add_executable(simple_test
 
 target_link_libraries(simple_test
     PUBLIC
-    interfaces_server
+    CHRIC_InterfaceServer
+    protobuf::libprotobuf
+    gRPC::grpc++
     PRIVATE 
-    CHRIC_Common_Log
+    CHRIC_CommonLog
 )

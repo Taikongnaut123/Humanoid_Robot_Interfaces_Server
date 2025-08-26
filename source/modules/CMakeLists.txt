@@ -8,9 +8,9 @@ set(MODULE_SOURCES
 )
 
 # 将模块源文件添加到主库中
-target_sources(interfaces_server PRIVATE ${MODULE_SOURCES})
+target_sources(${TARGET_NAME} PRIVATE ${MODULE_SOURCES})
 
 # 添加模块头文件目录
-target_include_directories(interfaces_server PRIVATE 
+target_include_directories(${TARGET_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
 )
