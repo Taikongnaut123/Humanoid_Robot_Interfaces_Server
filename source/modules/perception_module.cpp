@@ -4,14 +4,14 @@
  * Perception Module Implementation - 感知模块实现
  */
 
-#include "modules/perception_module.h"
 #include <iostream>
 #include <thread>
 #include <chrono>
 #include <random>
-#include "grpcpp/grpcpp.h"
+#include "modules/perception_module.h"
 #include "perception/perception_service.grpc.pb.h"
 #include "perception/perception_request_response.pb.h"
+#include "grpcpp/grpcpp.h"
 #include "Log/wlog.hpp"
 using namespace humanoid_robot;
 using namespace humanoid_robot::PB::perception;
