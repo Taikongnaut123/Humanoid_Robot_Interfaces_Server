@@ -5,10 +5,10 @@ set(TARGET_NAME CHRIC_InterfaceServer)
 # 创建服务器库 (与Client-SDK模式一致)
 add_library(${TARGET_NAME} SHARED
     interfaces_server.cpp
+    modules/module_base.cpp
+    modules/perception_module.cpp
+    modules/module_manager.cpp
 )
-
-# 添加模块子目录
-add_subdirectory(modules)
 
 # 设置包含目录
 target_include_directories(${TARGET_NAME}
