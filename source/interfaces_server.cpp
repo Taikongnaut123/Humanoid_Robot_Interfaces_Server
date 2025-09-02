@@ -88,14 +88,9 @@ namespace humanoid_robot
 
                 // 解析请求中的 commandID 和 data - 这里采用拷贝的方法获取request中input的副本，避免多线程（grpc的线程）访问冲突
                 auto inputMap = request.input().keyvaluelist();
+
                 WLOG_DEBUG("Input map size: %d", (int)inputMap.size());
                 WLOG_DEBUG("Request size: %d bytes", request.ByteSize());
-
-                // 先打印所有键，确认数据内容
-                for (const auto &pair : inputMap)
-                {
-                    WLOG_DEBUG("Key: '%s', Value type: %d", pair.first.c_str(), (int)pair.second.value_case());
-                }
 
                 int32_t commandID = -1;
                 ::humanoid_robot::PB::common::Dictionary data_ref;
