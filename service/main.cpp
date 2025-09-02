@@ -32,6 +32,7 @@ void SignalHandler(int signal)
 
 int main(int argc, char **argv)
 {
+    WLogSetPath(GetExeDir() + "/SDK-Server/logs");
     WLogInit();
     // 设置信号处理
     signal(SIGINT, SignalHandler);

@@ -73,6 +73,7 @@ namespace humanoid_robot
             }
             // context->
             SendRequest request;
+            SendRequest stable_request;
             // 读取请求数据
             if (stream->Read(&request))
             {
@@ -83,14 +84,13 @@ namespace humanoid_robot
                 }
 
                 // 使用 swap 避免内存拷贝，确保数据稳定性
-                // SendRequest stable_request;
-                // stable_request.Swap(&request);
+                stable_request = request;
 
                 // 解析请求中的 commandID 和 data - 这里采用拷贝的方法获取request中input的副本，避免多线程（grpc的线程）访问冲突
-                auto inputMap = request.input().keyvaluelist();
+                auto &inputMap = stable_request.input().keyvaluelist();
 
                 WLOG_DEBUG("Input map size: %d", (int)inputMap.size());
-                WLOG_DEBUG("Request size: %d bytes", request.ByteSize());
+                WLOG_DEBUG("Request size: %d bytes", stable_request.ByteSize());
 
                 int32_t commandID = -1;
                 ::humanoid_robot::PB::common::Dictionary data_ref;
@@ -135,7 +135,7 @@ namespace humanoid_robot
                 data_ref = data_iter->second.dictvalue();
                 WLOG_DEBUG("Parsed data with %d entries", data_ref.keyvaluelist_size());
 
-                auto params_ptr = request.mutable_params();
+                auto params_ptr = stable_request.mutable_params();
                 // 调用模块管理器执行命令
                 auto result = module_manager_->ExecuteCommand(context, commandID, data_ref,
                                                               *params_ptr, 10000);
