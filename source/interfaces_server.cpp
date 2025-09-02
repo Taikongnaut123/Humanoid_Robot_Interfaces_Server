@@ -81,64 +81,65 @@ namespace humanoid_robot
                 {
                     return grpc::Status(grpc::StatusCode::DEADLINE_EXCEEDED, "Stream timeout");
                 }
-                // 解析请求中的 commandID 和 data
-                auto &inputMap = request.input().keyvaluelist();
-                auto iter = inputMap.find("commandID");
-                std::cout << "Input map size: " << inputMap.size() << std::endl;
-                std::cout << "request size:" << request.ByteSize() << std::endl;
-                // ::humanoid_robot::PB::common::Dictionary data_ref;
-                // for (auto &pair : inputMap)
-                // {
-                //     if (pair.first == "commandID")
-                //     {
-                //         if (pair.second.value_case() != ::humanoid_robot::PB::common::Variant::kInt32Value)
-                //         {
-                //             WLOG_ERROR("send input map's commandID type is invalid, expect(%d), actual(%d)",
-                //                        static_cast<int>(::humanoid_robot::PB::common::Variant::kInt32Value),
-                //                        static_cast<int>(pair.second.value_case()));
-                //             return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "commandID type is invalid");
-                //         }
-                //         commandID = pair.second.int32value();
-                //         WLOG_DEBUG("Parsed commandID: %d", commandID);
-                //     }
-                //     if (pair.first == "data")
-                //     {
-                //         if (!pair.second.has_dictvalue())
-                //         {
-                //             WLOG_ERROR("data does not contain dictvalue");
-                //             return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "data type invalid");
-                //         }
-                //         data_ref = pair.second.dictvalue();
-                //         WLOG_DEBUG("Parsed data with %d entries", data_ref.keyvaluelist_size());
-                //     }
-                // }
-                if (iter == inputMap.end())
+
+                // 使用 swap 避免内存拷贝，确保数据稳定性
+                // SendRequest stable_request;
+                // stable_request.Swap(&request);
+
+                // 解析请求中的 commandID 和 data - 这里采用拷贝的方法获取request中input的副本，避免多线程（grpc的线程）访问冲突
+                auto inputMap = request.input().keyvaluelist();
+                WLOG_DEBUG("Input map size: %d", (int)inputMap.size());
+                WLOG_DEBUG("Request size: %d bytes", request.ByteSize());
+
+                // 先打印所有键，确认数据内容
+                for (const auto &pair : inputMap)
+                {
+                    WLOG_DEBUG("Key: '%s', Value type: %d", pair.first.c_str(), (int)pair.second.value_case());
+                }
+
+                int32_t commandID = -1;
+                ::humanoid_robot::PB::common::Dictionary data_ref;
+
+                // 使用稳定的map进行查找
+                auto commandID_iter = inputMap.find("commandID");
+                if (commandID_iter == inputMap.end())
                 {
                     WLOG_ERROR("send input map not contain commandID");
+                    // 再次确认map内容
+                    WLOG_ERROR("Map contains %d entries:", (int)inputMap.size());
+                    for (const auto &pair : inputMap)
+                    {
+                        WLOG_ERROR("  Key: '%s'", pair.first.c_str());
+                    }
                     return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "commandID not exist");
                 }
-                // Expect commandID as int32 stored in oneof int32Value
-                if (iter->second.value_case() != ::humanoid_robot::PB::common::Variant::kInt32Value)
+
+                if (commandID_iter->second.value_case() != ::humanoid_robot::PB::common::Variant::kInt32Value)
                 {
                     WLOG_ERROR("send input map's commandID type is invalid, expect(%d), actual(%d)",
                                static_cast<int>(::humanoid_robot::PB::common::Variant::kInt32Value),
-                               static_cast<int>(iter->second.value_case()));
+                               static_cast<int>(commandID_iter->second.value_case()));
                     return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "commandID type is invalid");
                 }
-                auto commandID = iter->second.int32value();
-                iter = inputMap.find("data");
-                if (iter == inputMap.end())
+                commandID = commandID_iter->second.int32value();
+                WLOG_DEBUG("Parsed commandID: %d", commandID);
+
+                // 查找 data
+                auto data_iter = inputMap.find("data");
+                if (data_iter == inputMap.end())
                 {
                     WLOG_ERROR("send input map not contain data");
                     return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "data not exist");
                 }
-                // Obtain mutable references to avoid copying MapField and merge issues
-                if (!iter->second.has_dictvalue())
+
+                if (!data_iter->second.has_dictvalue())
                 {
                     WLOG_ERROR("data does not contain dictvalue");
                     return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "data type invalid");
                 }
-                auto data_ref = iter->second.dictvalue();
+                data_ref = data_iter->second.dictvalue();
+                WLOG_DEBUG("Parsed data with %d entries", data_ref.keyvaluelist_size());
+
                 auto params_ptr = request.mutable_params();
                 // 调用模块管理器执行命令
                 auto result = module_manager_->ExecuteCommand(context, commandID, data_ref,
