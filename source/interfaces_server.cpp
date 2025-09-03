@@ -17,6 +17,9 @@
 #include "Log/wlog.hpp"
 #include <algorithm>
 #include "grpc/status.h"
+#include <thread>
+
+using namespace std::chrono;
 
 using namespace humanoid_robot::PB::interfaces;
 using namespace humanoid_robot::PB::common;
@@ -91,7 +94,21 @@ namespace humanoid_robot
 
                 WLOG_DEBUG("Input map size: %d", (int)inputMap.size());
                 WLOG_DEBUG("Request size: %d bytes", stable_request.ByteSize());
+                WLOG_INFO("this is info log");
+                WLOG_DEBUG("this is debug log");
+                WLOG_ERROR("this is error log");
+                WLOG_FATAL("this is fatal log");
+                WLOG_WARN("this is warn log");
 
+                auto in = std::string(200, 'a');
+                for (int32_t i = 0; i < 10240; i++)
+                {
+                    WLOG_INFO("this is info log : %s", in.c_str());
+                    WLOG_DEBUG("this is debug log : %s", in.c_str());
+                    WLOG_ERROR("this is error log : %s", in.c_str());
+                    WLOG_FATAL("this is fatal log : %s", in.c_str());
+                    WLOG_WARN("this is warn log : %s", in.c_str());
+                }
                 int32_t commandID = -1;
                 ::humanoid_robot::PB::common::Dictionary data_ref;
 
