@@ -70,7 +70,7 @@ namespace humanoid_robot
 
                     if (!pImpl_->channel_)
                     {
-                        std::cerr << "[Perception] Failed to create gRPC channel to " << target << std::endl;
+                        WLOG_ERROR("[Perception] Failed to create gRPC channel to %s", target.c_str());
                         return false;
                     }
 
@@ -79,7 +79,7 @@ namespace humanoid_robot
 
                     if (!pImpl_->stub_)
                     {
-                        std::cerr << "[Perception] Failed to create service stub" << std::endl;
+                        WLOG_ERROR("[Perception] Failed to create service stub");
                         return false;
                     }
 
@@ -87,12 +87,12 @@ namespace humanoid_robot
                     auto deadline = std::chrono::system_clock::now() + std::chrono::seconds(5);
                     if (pImpl_->channel_->WaitForConnected(deadline))
                     {
-                        std::cout << "[Perception] Successfully connected to perception service at " << target << std::endl;
+                        WLOG_DEBUG("[Perception] Successfully connected to perception service at %s", target.c_str());
                         pImpl_->connected_ = true;
                     }
                     else
                     {
-                        std::cerr << "[Perception] Failed to connect to perception service at " << target << std::endl;
+                        WLOG_ERROR("[Perception] Failed to connect to perception service at %s", target.c_str());
                         return false;
                     }
 
@@ -100,7 +100,7 @@ namespace humanoid_robot
                 }
                 catch (const std::exception &e)
                 {
-                    std::cerr << "[Perception] Exception during initialization: " << e.what() << std::endl;
+                    WLOG_FATAL("[Perception] Exception during initialization: %s", e.what());
                     return false;
                 }
                 return true;
@@ -299,8 +299,7 @@ namespace humanoid_robot
                         }
                     }
 
-                    std::cout << "[Perception] Successfully processed perception request, got "
-                              << responses.size() << " results" << std::endl;
+                    WLOG_DEBUG("[Perception] Successfully processed perception request, got %d results", responses.size());
 
                     return ModuleResult::Success("Perception", GET_PERCEPTION_RESULT, std::move(result_data));
                 }
@@ -373,15 +372,15 @@ namespace humanoid_robot
                                                    status.error_code(),
                                                    "Detection service error: " + status.error_message());
                     }
-                    std::cout << "[Perception] Detection request processed successfully" << std::endl;
+                    WLOG_DEBUG("[Perception] Detection request processed successfully");
                     // 构造返回结果
                     auto result_data = std::make_unique<humanoid_robot::PB::common::Dictionary>();
                     auto result_kv_map = result_data->mutable_keyvaluelist();
                     auto response_timestamp = response.timestamp();
                     auto response_rows_size = response.rows_size();
                     auto response_rows = response.rows();
-                    std::cout << "[Perception] Response timestamp: " << response_timestamp << std::endl;
-                    std::cout << "[Perception] Response rows size: " << response_rows_size << std::endl;
+                    WLOG_DEBUG("[Perception] Response timestamp: %s", response_timestamp.c_str());
+                    WLOG_DEBUG("[Perception] Response rows size: %d", response_rows_size);
                     // 添加检测结果数量
                     {
                         humanoid_robot::PB::common::Variant var;
@@ -432,8 +431,7 @@ namespace humanoid_robot
                         }
                     }
 
-                    std::cout << "[Perception] Successfully processed detection request, got "
-                              << response.rows_size() << " detections" << std::endl;
+                    WLOG_DEBUG("[Perception] Successfully processed detection request, got %d detections", response.rows_size());
 
                     return ModuleResult::Success("Perception", GET_DETECTION_RESULT, std::move(result_data));
                 }
@@ -579,8 +577,7 @@ namespace humanoid_robot
                         }
                     }
 
-                    std::cout << "[Perception] Successfully processed division request, got "
-                              << response.rows_size() << " divisions" << std::endl;
+                    WLOG_DEBUG("[Perception] Successfully processed division request, got %d divisions", response.rows_size());
 
                     return ModuleResult::Success("Perception", GET_DIVISION_RESULT, std::move(result_data));
                 }

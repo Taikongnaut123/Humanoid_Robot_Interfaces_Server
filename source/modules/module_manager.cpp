@@ -8,6 +8,7 @@
 #include "perception/perception_request_response.pb.h"
 #include <iostream>
 #include <grpcpp/server_context.h>
+#include "Log/wlog.hpp"
 using namespace humanoid_robot::PB::perception;
 
 namespace humanoid_robot
@@ -37,32 +38,32 @@ namespace humanoid_robot
 
             bool ModuleManager::StartAllModules()
             {
-                std::cout << "[ModuleManager] Starting all modules..." << std::endl;
+                WLOG_DEBUG("[ModuleManager] Starting all modules...");
 
                 bool all_started = true;
 
                 // 启动感知模块
                 if (perception_module_ && !perception_module_->Start())
                 {
-                    std::cerr << "[ModuleManager] Failed to start Perception module" << std::endl;
+                    WLOG_ERROR("[ModuleManager] Failed to start Perception module");
                     all_started = false;
                 }
 
                 // TODO: 启动其他模块
                 /*
                 if (decision_module_ && !decision_module_->Start()) {
-                    std::cerr << "[ModuleManager] Failed to start Decision module" << std::endl;
+                    std::cerr << "[ModuleManager] Failed to start Decision module" );
                     all_started = false;
                 }
                 */
 
                 if (all_started)
                 {
-                    std::cout << "[ModuleManager] All modules started successfully" << std::endl;
+                    WLOG_DEBUG("[ModuleManager] All modules started successfully");
                 }
                 else
                 {
-                    std::cerr << "[ModuleManager] Some modules failed to start" << std::endl;
+                    WLOG_ERROR("[ModuleManager] Some modules failed to start");
                 }
 
                 return all_started;
@@ -70,7 +71,7 @@ namespace humanoid_robot
 
             void ModuleManager::StopAllModules()
             {
-                std::cout << "[ModuleManager] Stopping all modules..." << std::endl;
+                WLOG_DEBUG("[ModuleManager] Stopping all modules...");
 
                 if (perception_module_)
                 {
@@ -79,7 +80,7 @@ namespace humanoid_robot
 
                 // TODO: 停止其他模块
 
-                std::cout << "[ModuleManager] All modules stopped" << std::endl;
+                WLOG_DEBUG("[ModuleManager] All modules stopped");
             }
 
             bool ModuleManager::AreAllModulesRunning() const
@@ -94,7 +95,7 @@ namespace humanoid_robot
                 humanoid_robot::PB::common::Dictionary &params,
                 int32_t timeout_ms)
             {
-                std::cout << "[ModuleManager] Executing command: " << command_id << std::endl;
+                WLOG_DEBUG("[ModuleManager] Executing command: %d", command_id);
 
                 ModuleBase *module = GetModuleForCommand(command_id);
                 if (!module)
@@ -112,7 +113,7 @@ namespace humanoid_robot
                 humanoid_robot::PB::common::Dictionary &input_data,
                 humanoid_robot::PB::common::Dictionary &params)
             {
-                std::cout << "[ModuleManager] Executing command async: " << command_id << std::endl;
+                WLOG_DEBUG("[ModuleManager] Executing command async: %d", command_id);
 
                 ModuleBase *module = GetModuleForCommand(command_id);
                 if (!module)

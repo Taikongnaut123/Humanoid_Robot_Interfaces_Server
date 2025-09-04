@@ -9,6 +9,7 @@
 #include <chrono>
 #include <sstream>
 #include <grpcpp/grpcpp.h>
+#include "Log/wlog.hpp"
 
 namespace humanoid_robot
 {
@@ -35,12 +36,12 @@ namespace humanoid_robot
                     return true; // 已经运行中
                 }
 
-                std::cout << "[" << module_name_ << "] Starting module..." << std::endl;
+                WLOG_DEBUG("[ %s ] Starting module...", module_name_.c_str());
 
                 // 调用子类初始化
                 if (!Initialize())
                 {
-                    std::cerr << "[" << module_name_ << "] Failed to initialize module" << std::endl;
+                    WLOG_ERROR("[ %s ] Failed to initialize module", module_name_.c_str());
                     return false;
                 }
 
@@ -53,8 +54,7 @@ namespace humanoid_robot
                     worker_threads_.emplace_back(&ModuleBase::WorkerThread, this);
                 }
 
-                std::cout << "[" << module_name_ << "] Module started with "
-                          << worker_thread_count_ << " worker threads" << std::endl;
+                WLOG_DEBUG("[%s] Module started with %zu worker threads", module_name_.c_str(), worker_thread_count_);
                 return true;
             }
 
@@ -65,7 +65,7 @@ namespace humanoid_robot
                     return; // 已经停止
                 }
 
-                std::cout << "[" << module_name_ << "] Stopping module..." << std::endl;
+                WLOG_DEBUG("[%s] Stopping module...", module_name_.c_str());
 
                 running_.store(false);
 
@@ -98,7 +98,7 @@ namespace humanoid_robot
                 // 调用子类清理
                 Cleanup();
 
-                std::cout << "[" << module_name_ << "] Module stopped" << std::endl;
+                WLOG_DEBUG("[%s] Module stopped", module_name_.c_str());
             }
 
             std::future<ModuleResult> ModuleBase::ExecuteAsync(
@@ -185,7 +185,7 @@ namespace humanoid_robot
 
             void ModuleBase::WorkerThread()
             {
-                std::cout << "[" << module_name_ << "] Worker thread started" << std::endl;
+                WLOG_DEBUG("[%s] Worker thread started", module_name_.c_str());
 
                 while (running_.load())
                 {
@@ -213,8 +213,8 @@ namespace humanoid_robot
                     {
                         try
                         {
-                            std::cout << "[" << module_name_ << "] Processing command: "
-                                      << task->command_id << " (task: " << task->task_id << ")" << std::endl;
+                            WLOG_DEBUG("[%s] Processing command: %d (task: %d)",
+                                       module_name_.c_str(), task->command_id, task->task_id);
                             grpc::ServerContext context;
                             // 执行命令
                             ModuleResult result = ProcessCommand(&context, task->command_id, task->input_data, task->params);
@@ -224,18 +224,14 @@ namespace humanoid_robot
                         }
                         catch (const std::exception &e)
                         {
-                            std::cerr << "[" << module_name_ << "] Exception in command "
-                                      << task->command_id << ": " << e.what() << std::endl;
-
+                            WLOG_FATAL("[%s] Exception in command %d: %s", module_name_.c_str(), task->command_id, e.what());
                             task->result_promise.set_value(
                                 ModuleResult::Error(module_name_, task->command_id,
                                                     -4, "Exception: " + std::string(e.what())));
                         }
                         catch (...)
                         {
-                            std::cerr << "[" << module_name_ << "] Unknown exception in command "
-                                      << task->command_id << std::endl;
-
+                            WLOG_FATAL("[%s] Unknown exception in command %d", module_name_.c_str(), task->command_id);
                             task->result_promise.set_value(
                                 ModuleResult::Error(module_name_, task->command_id,
                                                     -5, "Unknown exception"));
@@ -243,7 +239,7 @@ namespace humanoid_robot
                     }
                 }
 
-                std::cout << "[" << module_name_ << "] Worker thread stopped" << std::endl;
+                WLOG_DEBUG("[%s] Worker thread stopped", module_name_.c_str());
             }
 
             int32_t ModuleBase::GenerateTaskId()
