@@ -27,9 +27,9 @@ target_link_libraries(${TARGET_NAME}
     gRPC::grpc++_reflection
     PRIVATE 
     CHRIC_CommonLog
-    PB::interfacesPB
-    PB::commonPB
-    PB::perceptionPB
+    PB::CHRIC_interfacesPB
+    PB::CHRIC_commonPB
+    PB::CHRIC_perceptionPB
 )
 
 set_target_properties(${TARGET_NAME}
