@@ -40,3 +40,10 @@ set_target_properties(${TARGET_NAME}
     PUBLIC_HEADER "interfaces_server.h"
     RUNTIME_OUTPUT_DIRECTORY ${OUTPUT_BIN_DIR}
 )
+
+# 安装库文件到 sdk_server/lib
+install(TARGETS ${TARGET_NAME}
+    LIBRARY DESTINATION sdk_server/lib
+    ARCHIVE DESTINATION sdk_server/lib
+    RUNTIME DESTINATION sdk_server/bin
+)

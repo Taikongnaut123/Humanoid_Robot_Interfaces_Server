@@ -35,10 +35,8 @@ target_link_libraries(${TARGET_NAME}
 set_target_properties(${TARGET_NAME}
     PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${OUTPUT_BIN_DIR}
-    BUILD_RPATH "${COMMON_RUNTIME_LIBRARY_PATHS}"        # 构建时的 RPATH
-    INSTALL_RPATH "${COMMON_RUNTIME_LIBRARY_PATHS}"      # 安装时的 RPATH
-    INSTALL_RPATH_USE_LINK_PATH TRUE
+    # 使用全局 CMAKE_INSTALL_RPATH 配置
 )
 
-# 可选：安装规则
-install(TARGETS ${TARGET_NAME} DESTINATION ${CHRIC_CLOUD_FOLDER})
+# 可选：安装规则 - 安装到 sdk_server/bin
+install(TARGETS ${TARGET_NAME} DESTINATION sdk_server/bin)
