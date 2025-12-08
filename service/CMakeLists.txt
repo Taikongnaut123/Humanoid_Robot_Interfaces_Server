@@ -10,6 +10,7 @@ add_executable(${TARGET_NAME}
     ../source/modules/module_manager.cpp
     ../source/modules/module_base.cpp
     ../source/modules/perception_module.cpp
+    ../source/modules/navigation_module.cpp
 )
 
 
@@ -18,6 +19,15 @@ target_include_directories(${TARGET_NAME}
     PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
     ${PB_INCLUDE_DIR}
+    ${COMMON_INCLUDE_DIR}/communication_v2/net
+    ${COMMON_INCLUDE_DIR}/communication_v2/dds
+    ${COMMON_INCLUDE_DIR}/communication
+
+    ${loc_msg_INCLUDE_DIRS}
+    ${rclcpp_INCLUDE_DIRS}
+    ${CHRIC_CLOUD_FOLDER}/framework/common/include/communication
+
+
 )
 
 target_link_libraries(${TARGET_NAME}
@@ -27,9 +37,18 @@ target_link_libraries(${TARGET_NAME}
     gRPC::grpc++_reflection
     PRIVATE 
     CHRIC_CommonLog
-    PB::CHRIC_interfacesPB
+    # PB::CHRIC_interfacesPB
     PB::CHRIC_commonPB
     PB::CHRIC_perceptionPB
+
+    CHRIC_net_communication
+    libCHRIC_communicationPB
+    CHRIC_dds_discovery
+    libCHRIC_interfacesPB
+    rclcpp::rclcpp
+    ${loc_msg_LIBRARIES}
+
+
 )
 
 set_target_properties(${TARGET_NAME}
@@ -38,5 +57,5 @@ set_target_properties(${TARGET_NAME}
     # 使用全局 CMAKE_INSTALL_RPATH 配置
 )
 
-# 可选：安装规则 - 安装到 sdk_server/bin
-install(TARGETS ${TARGET_NAME} DESTINATION sdk_server/bin)
+# 可选：安装规则
+install(TARGETS ${TARGET_NAME} DESTINATION ${CHRIC_CLOUD_FOLDER}/bin/)

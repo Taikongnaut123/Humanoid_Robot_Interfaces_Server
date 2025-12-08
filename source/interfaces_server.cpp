@@ -143,9 +143,16 @@ namespace humanoid_robot
                 auto result = module_manager_->ExecuteCommand(context, commandID, data_ref,
                                                               *params_ptr, 10000);
                 SendResponse response;
+
+                auto ret = response.mutable_ret();
+                auto codeMsg = ret->mutable_code();
+                *codeMsg = std::to_string(result.error_code);
+                auto messageMsg = ret->mutable_message();
+                *messageMsg = result.error_message.c_str();
                 // 填充响应数据
                 if (result.output_data)
                 {
+
                     response.mutable_output()->Swap(result.output_data.get());
                 }
                 else

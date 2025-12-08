@@ -9,7 +9,10 @@
 #include <iostream>
 #include <grpcpp/server_context.h>
 #include "Log/wlog.hpp"
+#include "common/service.pb.h"
+
 using namespace humanoid_robot::PB::perception;
+using namespace humanoid_robot::PB::common;
 
 namespace humanoid_robot
 {
@@ -24,7 +27,7 @@ namespace humanoid_robot
                 perception_module_ = std::make_unique<PerceptionModule>();
                 // decision_module_ = std::make_unique<DecisionModule>();
                 // control_module_ = std::make_unique<ControlModule>();
-                // navigation_module_ = std::make_unique<NavigationModule>();
+                navigation_module_ = std::make_unique<NavigationModule>();
                 // hardware_module_ = std::make_unique<HardwareModule>();
 
                 InitializeModuleMappings();
@@ -46,6 +49,14 @@ namespace humanoid_robot
                 if (perception_module_ && !perception_module_->Start())
                 {
                     WLOG_ERROR("[ModuleManager] Failed to start Perception module");
+                    all_started = false;
+                }
+
+
+                // 启动导航模块
+                if (navigation_module_ && !navigation_module_->Start())
+                {
+                    WLOG_ERROR("[ModuleManager] Failed to start Navigation module");
                     all_started = false;
                 }
 
@@ -78,6 +89,12 @@ namespace humanoid_robot
                     perception_module_->Stop();
                 }
 
+                // 停止导航模块
+                if (navigation_module_)
+                {
+                    navigation_module_->Stop();
+                }
+
                 // TODO: 停止其他模块
 
                 WLOG_DEBUG("[ModuleManager] All modules stopped");
@@ -85,7 +102,8 @@ namespace humanoid_robot
 
             bool ModuleManager::AreAllModulesRunning() const
             {
-                return perception_module_ && perception_module_->IsRunning();
+                return perception_module_ && perception_module_->IsRunning() &&
+                       navigation_module_ && navigation_module_->IsRunning();
                 // TODO: 检查其他模块
             }
 
@@ -95,15 +113,16 @@ namespace humanoid_robot
                 humanoid_robot::PB::common::Dictionary &params,
                 int32_t timeout_ms)
             {
+                ModuleBase *module=nullptr;
                 WLOG_DEBUG("[ModuleManager] Executing command: %d", command_id);
 
-                ModuleBase *module = GetModuleForCommand(command_id);
+                module = GetModuleForCommand(command_id);
+                
                 if (!module)
                 {
                     return ModuleResult::Error("ModuleManager", command_id,
-                                               -100, "No module found for command: " + command_id);
+                                            -100, "No module found for command: " + std::to_string(command_id));
                 }
-
                 return module->ExecuteSync(context, command_id, input_data,
                                            params, timeout_ms);
             }
@@ -182,26 +201,32 @@ namespace humanoid_robot
             void ModuleManager::InitializeModuleMappings()
             {
                 modules_["Perception"] = perception_module_.get();
+                modules_["Navigation"] = navigation_module_.get();
                 // TODO: 添加其他模块映射
             }
 
             void ModuleManager::InitializeCommandMappings()
             {
                 // 感知模块命令映射
-                command_to_module_[CommandCode::GET_PERCEPTION_RESULT] = perception_module_.get();
-                command_to_module_[CommandCode::GET_DETECTION_RESULT] = perception_module_.get();
-                command_to_module_[CommandCode::GET_DIVISION_RESULT] = perception_module_.get();
+                command_to_module_[humanoid_robot::PB::common::CommandCode::GET_PERCEPTION_RESULT] = perception_module_.get();
+                command_to_module_[humanoid_robot::PB::common::CommandCode::GET_DETECTION_RESULT] = perception_module_.get();
+                command_to_module_[humanoid_robot::PB::common::CommandCode::GET_DIVISION_RESULT] = perception_module_.get();
 
                 // TODO: 添加其他模块的命令映射
+                command_to_module_[humanoid_robot::PB::common::CommandCode::NAVIGATION_TO] = navigation_module_.get();
+                command_to_module_[humanoid_robot::PB::common::CommandCode::GET_CURRENT_POSE] = navigation_module_.get();
             }
 
             ModuleBase *ModuleManager::GetModuleForCommand(const int32_t &command_id) const
             {
+                WLOG_DEBUG("[ModuleManager] GetModuleForCommand: %d", command_id);
                 auto it = command_to_module_.find(command_id);
                 if (it != command_to_module_.end())
                 {
+                    WLOG_DEBUG("[ModuleManager] GetModuleForCommand: %d ", command_id);
                     return it->second;
                 }
+                WLOG_DEBUG("[ModuleManager] GetModuleForCommand: %d -> nullptr", command_id);
                 return nullptr;
             }
 

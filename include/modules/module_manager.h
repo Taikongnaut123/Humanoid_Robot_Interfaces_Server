@@ -10,6 +10,7 @@
 
 #include "modules/module_base.h"
 #include "modules/perception_module.h"
+#include "modules/navigation_module.h"
 #include <grpcpp/server_context.h>
 
 #include <unordered_map>
@@ -96,6 +97,9 @@ namespace humanoid_robot
             private:
                 // 模块实例
                 std::unique_ptr<PerceptionModule> perception_module_;
+                std::unique_ptr<NavigationModule> navigation_module_;
+
+
 
                 // 模块映射 (用于通过名称访问)
                 std::unordered_map<std::string, ModuleBase *> modules_;

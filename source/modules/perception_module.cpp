@@ -13,6 +13,8 @@
 #include "perception/perception_request_response.pb.h"
 #include "grpcpp/grpcpp.h"
 #include "Log/wlog.hpp"
+#include "common/service.pb.h"
+
 using namespace humanoid_robot;
 using namespace humanoid_robot::PB::perception;
 using namespace humanoid_robot::PB::common;

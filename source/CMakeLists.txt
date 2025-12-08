@@ -8,8 +8,10 @@ add_library(${TARGET_NAME} SHARED
     modules/module_base.cpp
     modules/perception_module.cpp
     modules/module_manager.cpp
+    modules/navigation_module.cpp
 )
 
+message(STATUS "COMMON_INCLUDE_DIR: ${COMMON_INCLUDE_DIR}")
 # 设置包含目录
 target_include_directories(${TARGET_NAME}
     PUBLIC
@@ -18,6 +20,13 @@ target_include_directories(${TARGET_NAME}
 
     PRIVATE
     CHRIC_CommonLog
+
+    ${COMMON_INCLUDE_DIR}/communication_v2/net
+    ${COMMON_INCLUDE_DIR}/communication_v2/dds
+    ${COMMON_INCLUDE_DIR}/communication
+
+    ${loc_msg_INCLUDE_DIRS}
+    ${rclcpp_INCLUDE_DIRS}
 )
 
 target_link_libraries(${TARGET_NAME}
@@ -30,6 +39,14 @@ target_link_libraries(${TARGET_NAME}
     PB::CHRIC_interfacesPB
     PB::CHRIC_commonPB
     PB::CHRIC_perceptionPB
+
+    CHRIC_net_communication
+    libCHRIC_communicationPB
+    CHRIC_dds_discovery
+    libCHRIC_interfacesPB
+    rclcpp::rclcpp
+    ${loc_msg_LIBRARIES}
+
 )
 
 set_target_properties(${TARGET_NAME}
