@@ -6,47 +6,44 @@ set(TARGET_NAME CHRIC_InterfaceServer)
 add_library(${TARGET_NAME} SHARED
     interfaces_server.cpp
     modules/module_base.cpp
-    modules/perception_module.cpp
+    # modules/perception_module.cpp
     modules/module_manager.cpp
     modules/navigation_module.cpp
 )
 
 message(STATUS "COMMON_INCLUDE_DIR: ${COMMON_INCLUDE_DIR}")
-# 设置包含目录
-target_include_directories(${TARGET_NAME}
-    PUBLIC
-    ${INTERFACES_SERVER_INCLUDE_DIR}
-    ${PB_INCLUDE_DIR}
 
-    PRIVATE
-    CHRIC_CommonLog
+# find_package(grpc++ REQUIRED)
+find_package(chric_common_log REQUIRED)
+find_package(chric_protobuf_interfaces REQUIRED)
+find_package(chric_protobuf_ros2 REQUIRED)
+find_package(chric_protobuf_sdk_service REQUIRED)
+find_package(loc_msg REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(chric_communication_v2_net REQUIRED)
+find_package(chric_communication_v2_dds_discovery REQUIRED)
+find_package(chric_protobuf_perception REQUIRED)
+find_package(chric_utils REQUIRED)
 
-    ${COMMON_INCLUDE_DIR}/communication_v2/net
-    ${COMMON_INCLUDE_DIR}/communication_v2/dds
-    ${COMMON_INCLUDE_DIR}/communication
 
-    ${loc_msg_INCLUDE_DIRS}
-    ${rclcpp_INCLUDE_DIRS}
+ament_target_dependencies(${TARGET_NAME}
+    chric_common_log
+    chric_protobuf_interfaces
+    chric_protobuf_perception
+    chric_protobuf_ros2
+    chric_protobuf_sdk_service
+
+    loc_msg
+    rclcpp
+    chric_communication_v2_net
+    chric_communication_v2_dds_discovery
+    chric_utils
 )
 
 target_link_libraries(${TARGET_NAME}
-    PUBLIC
     protobuf::libprotobuf
     gRPC::grpc++
     gRPC::grpc++_reflection
-    PRIVATE 
-    CHRIC_CommonLog
-    PB::CHRIC_interfacesPB
-    PB::CHRIC_commonPB
-    PB::CHRIC_perceptionPB
-
-    CHRIC_net_communication
-    libCHRIC_communicationPB
-    CHRIC_dds_discovery
-    libCHRIC_interfacesPB
-    rclcpp::rclcpp
-    ${loc_msg_LIBRARIES}
-
 )
 
 set_target_properties(${TARGET_NAME}

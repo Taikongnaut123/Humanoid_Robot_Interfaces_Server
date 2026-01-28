@@ -16,8 +16,9 @@ set(INTERFACES_SERVER_INCLUDE_DIR "${INTERFACES_SERVER_ROOT_PATH}/include")
 set(INTERFACES_SERVER_SOURCE_DIR "${INTERFACES_SERVER_ROOT_PATH}/source")
 set(INTERFACES_SERVER_EXAMPLES_DIR "${INTERFACES_SERVER_ROOT_PATH}/examples")
 
+include_directories(${INTERFACES_SERVER_INCLUDE_DIR})
 
 
 # 添加子目录
-add_subdirectory(source)
+# add_subdirectory(source)
 add_subdirectory(service)

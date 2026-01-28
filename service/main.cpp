@@ -9,11 +9,11 @@
  * - 返回处理结果
  */
 
-#include <iostream>
-#include <signal.h>
-#include <memory>
-#include "interfaces_server.h"
 #include "Log/wlog.hpp"
+#include "interfaces_server.h"
+#include <iostream>
+#include <memory>
+#include <signal.h>
 
 using namespace humanoid_robot::server;
 
@@ -21,57 +21,52 @@ using namespace humanoid_robot::server;
 std::unique_ptr<InterfacesServer> g_server;
 
 // 信号处理函数
-void SignalHandler(int signal)
-{
-    WLOG_DEBUG("\nReceived signal %d, shutting down server...", signal);
-    if (g_server)
-    {
-        g_server->Stop();
-    }
+void SignalHandler(int signal) {
+  WLOG_DEBUG("\nReceived signal %d, shutting down server...", signal);
+  if (g_server) {
+    g_server->Stop();
+  }
 }
 
-int main(int argc, char **argv)
-{
-    WLogSetPath(GetExeDir() + "/SDK-Server/logs");
-    WLogInit();
-    // 设置信号处理
-    signal(SIGINT, SignalHandler);
-    signal(SIGTERM, SignalHandler);
+int main(int argc, char **argv) {
+  WLogSetPath(GetExeDir() + "/SDK-Server/logs");
+  WLogInit();
+  // 设置信号处理
+  signal(SIGINT, SignalHandler);
+  signal(SIGTERM, SignalHandler);
 
-    WLOG_DEBUG("=== Humanoid Robot gRPC Interface Server ===");
-    WLOG_DEBUG("Multi-threaded callback architecture with persistent subscriptions");
-    WLOG_DEBUG("Acting as middleware between Client-SDK and perception_pipeline_cpp");
+  WLOG_DEBUG("=== Humanoid Robot gRPC Interface Server ===");
+  WLOG_DEBUG(
+      "Multi-threaded callback architecture with persistent subscriptions");
+  WLOG_DEBUG(
+      "Acting as middleware between Client-SDK and perception_pipeline_cpp");
 
-    try
-    {
-        // 创建服务器实例
-        g_server = std::make_unique<InterfacesServer>();
+  try {
+    // 创建服务器实例
+    g_server = std::make_unique<InterfacesServer>();
 
-        // 启动服务器 - 监听Client-SDK连接
-        std::string server_address = "0.0.0.0:50051"; // 对外提供服务的地址
-        if (!g_server->Start(server_address))
-        {
-            WLOG_ERROR("Failed to start server!");
-            return 1;
-        }
-
-        WLOG_INFO("🚀 Interfaces-Server ready! Client-SDK can connect now!");
-        WLOG_INFO("📡 Listening on: %s", server_address.c_str());
-        WLOG_INFO("🔗 Connected to perception_pipeline_cpp at localhost:50052");
-        WLOG_INFO("🔧 Multi-threaded callback notifications enabled");
-        WLOG_INFO("💬 Subscribe service creates persistent connections");
-        WLOG_INFO("Press Ctrl+C to stop...");
-
-        // 等待服务器关闭
-        g_server->Wait();
+    // 启动服务器 - 监听Client-SDK连接
+    std::string server_address = "0.0.0.0:50051"; // 对外提供服务的地址
+    if (!g_server->Start(server_address)) {
+      WLOG_ERROR("Failed to start server!");
+      return 1;
     }
-    catch (const std::exception &e)
-    {
-        WLOG_FATAL("Server error: %s", e.what());
-        return 1;
-    }
-    // 停止日志模块
-    WLogStop();
-    WLOG_DEBUG("Interfaces-Server shutdown completed.");
-    return 0;
+
+    WLOG_INFO("🚀 Interfaces-Server ready! Client-SDK can connect now!");
+    WLOG_INFO("📡 Listening on: %s", server_address.c_str());
+    WLOG_INFO("🔗 Connected to perception_pipeline_cpp at localhost:50052");
+    WLOG_INFO("🔧 Multi-threaded callback notifications enabled");
+    WLOG_INFO("💬 Subscribe service creates persistent connections");
+    WLOG_INFO("Press Ctrl+C to stop...");
+
+    // 等待服务器关闭
+    g_server->Wait();
+  } catch (const std::exception &e) {
+    WLOG_FATAL("Server error: %s", e.what());
+    return 1;
+  }
+  // 停止日志模块
+  WLogStop();
+  WLOG_DEBUG("Interfaces-Server shutdown completed.");
+  return 0;
 }

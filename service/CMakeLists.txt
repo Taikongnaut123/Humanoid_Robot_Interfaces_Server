@@ -9,48 +9,51 @@ add_executable(${TARGET_NAME}
     ../source/interfaces_server.cpp
     ../source/modules/module_manager.cpp
     ../source/modules/module_base.cpp
-    ../source/modules/perception_module.cpp
+    # ../source/modules/perception_module.cpp
     ../source/modules/navigation_module.cpp
+
 )
 
+# 添加调试选项
+# target_compile_options(${TARGET_NAME} PRIVATE -g)
 
-# 设置包含目录
-target_include_directories(${TARGET_NAME}
-    PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/../include
-    ${PB_INCLUDE_DIR}
-    ${COMMON_INCLUDE_DIR}/communication_v2/net
-    ${COMMON_INCLUDE_DIR}/communication_v2/dds
-    ${COMMON_INCLUDE_DIR}/communication
+# find_package(grpc++ REQUIRED)
 
-    ${loc_msg_INCLUDE_DIRS}
-    ${rclcpp_INCLUDE_DIRS}
-    ${CHRIC_CLOUD_FOLDER}/framework/common/include/communication
+find_package(loc_msg REQUIRED)
+find_package(rclcpp REQUIRED)
+
+find_package(chric_common_log REQUIRED)
+find_package(chric_protobuf_interfaces REQUIRED)
+find_package(chric_protobuf_ros2 REQUIRED)
+find_package(chric_protobuf_sdk_service REQUIRED)
+
+find_package(chric_communication_v2_net REQUIRED)
+find_package(chric_communication_v2_dds_discovery REQUIRED)
+find_package(chric_protobuf_perception REQUIRED)
+find_package(chric_utils_ros_proto_converter REQUIRED)
+find_package(chric_utils_message_serializer REQUIRED)
 
 
+ament_target_dependencies(${TARGET_NAME}
+    chric_common_log
+    chric_protobuf_interfaces
+    chric_protobuf_perception
+    chric_protobuf_ros2
+    chric_protobuf_sdk_service
+
+    loc_msg
+    rclcpp
+    chric_communication_v2_net
+    chric_communication_v2_dds_discovery
+    chric_utils_ros_proto_converter
+    chric_utils_message_serializer
 )
 
 target_link_libraries(${TARGET_NAME}
-    PUBLIC
     protobuf::libprotobuf
     gRPC::grpc++
     gRPC::grpc++_reflection
-    PRIVATE 
-    CHRIC_CommonLog
-    # PB::CHRIC_interfacesPB
-    PB::CHRIC_commonPB
-    PB::CHRIC_perceptionPB
-
-    CHRIC_net_communication
-    libCHRIC_communicationPB
-    CHRIC_dds_discovery
-    libCHRIC_interfacesPB
-    rclcpp::rclcpp
-    ${loc_msg_LIBRARIES}
-
-
 )
-
 set_target_properties(${TARGET_NAME}
     PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${OUTPUT_BIN_DIR}
