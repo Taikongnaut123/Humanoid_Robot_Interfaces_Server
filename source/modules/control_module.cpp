@@ -1,19 +1,113 @@
 #include "modules/control_module.h"
-// #include "control/control_request_response.pb.h"
-#include "Log/wlog.hpp"
+#include <rclcpp/rclcpp.hpp>
+#include <memory>
+#include <thread>
+#include <functional>
+#include <mutex>
+#include <vector>
+#include <string>
 
-// using namespace humanoid_robot::PB::control;
-using namespace humanoid_robot::PB::common;
-using namespace humanoid_robot::server::modules;
+#include "geometry_msgs/msg/twist.hpp"
+#include "motor_interface/msg/motor_drive.hpp"
+#include "motor_interface/msg/motor_feedback.hpp"
+#include "sdk_service/common/service.pb.h"
+#include "sdk_service/control/responce_emergency_stop.pb.h"
+#include "sdk_service/control/responce_get_joint_info.pb.h"
+#include "sdk_service/control/request_joint_motion.pb.h"
+#include "sdk_service/control/responce_joint_motion.pb.h"
+#include "sdk_service/control/responce_status.pb.h"
+
+#include "communication_v2/net/CNode.hpp"
+#include "Log/wlog.hpp"
+using namespace humanoid_robot::PB::sdk_service::common;
+
+namespace PB = humanoid_robot::PB;
+namespace PB_common = humanoid_robot::PB::common;
 
 namespace humanoid_robot {
 namespace server {
 namespace modules {
 
-// ControlImpl实现（包含通信接口和数据缓存）
+using ResponceEmergencyStop = humanoid_robot::PB::sdk_service::control::ResponceEmergencyStop;
+using ResponceGetJointInfo = humanoid_robot::PB::sdk_service::control::ResponceGetJointInfo;
+using ResponceJointMotion = humanoid_robot::PB::sdk_service::control::ResponceJointMotion;
+using ControlResStatus = humanoid_robot::PB::sdk_service::control::ResponceStatus;
+using ControlCommandCode = humanoid_robot::PB::sdk_service::common::ControlCommandCode;
+
+// ==================== 通信接口抽象类 ====================
+class CommunicationInterface {
+public:
+    virtual ~CommunicationInterface() = default;
+
+    virtual bool Initialize() = 0;
+    virtual void Cleanup() = 0;
+    virtual void PublishZeroVelocity() = 0;
+    virtual void PublishJointCommand(const std::vector<std::string>& joints,
+                                     const std::vector<int32_t>& modes,
+                                     const std::vector<double>& positions,
+                                     const std::vector<double>& velocities,
+                                     const std::vector<double>& torques) = 0;
+
+    // 使用void*作为回调参数，避免在头文件中暴露具体类型
+    using MotorFeedbackCallback = std::function<void(const void*)>;
+    virtual void SetMotorFeedbackCallback(MotorFeedbackCallback callback) = 0;
+};
+
+// ==================== ROS2通信实现类 ====================
+class ROS2Communication : public CommunicationInterface {
+public:
+    ROS2Communication();
+    ~ROS2Communication() override;
+
+    bool Initialize() override;
+    void Cleanup() override;
+    void PublishZeroVelocity() override;
+    void PublishJointCommand(const std::vector<std::string>& joints,
+                             const std::vector<int32_t>& modes,
+                             const std::vector<double>& positions,
+                             const std::vector<double>& velocities,
+                             const std::vector<double>& torques) override;
+    void SetMotorFeedbackCallback(MotorFeedbackCallback callback) override;
+
+private:
+    rclcpp::Node::SharedPtr node_;
+    std::thread ros_spin_thread_;
+    rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_pub_;
+    rclcpp::Publisher<motor_interface::msg::MotorDrive>::SharedPtr joint_motion_pub_;
+    rclcpp::Subscription<motor_interface::msg::MotorFeedback>::SharedPtr motor_feedback_sub_;
+    MotorFeedbackCallback feedback_callback_;
+    bool ros_initialized_;
+};
+
+// ==================== 自定义通信库实现类 ====================
+class FrameworkCommunication : public CommunicationInterface {
+public:
+    FrameworkCommunication();
+    ~FrameworkCommunication() override;
+
+    bool Initialize() override;
+    void Cleanup() override;
+    void PublishZeroVelocity() override;
+    void PublishJointCommand(const std::vector<std::string>& joints,
+                             const std::vector<int32_t>& modes,
+                             const std::vector<double>& positions,
+                             const std::vector<double>& velocities,
+                             const std::vector<double>& torques) override;
+    void SetMotorFeedbackCallback(MotorFeedbackCallback callback) override;
+
+private:
+    std::shared_ptr<humanoid_robot::framework::net::CNode> node_;
+    std::shared_ptr<humanoid_robot::framework::net::CPublisher<geometry_msgs::msg::Twist>> cmd_vel_pub_;
+    std::shared_ptr<humanoid_robot::framework::net::CPublisher<motor_interface::msg::MotorDrive>> joint_motion_pub_;
+    std::shared_ptr<humanoid_robot::framework::net::CSubscriber<motor_interface::msg::MotorFeedback>> motor_feedback_sub_;
+    MotorFeedbackCallback feedback_callback_;
+    bool initialized_;
+};
+
+// ==================== ControlImpl实现 ====================
 class ControlModule::ControlImpl {
 public:
-    // 通信接口实例（通过宏定义切换实现）
+    // 通信接口实例
 #ifdef USE_ROS2_COMMUNICATION
     std::unique_ptr<CommunicationInterface> comm_ = std::make_unique<ROS2Communication>();
 #else
@@ -22,7 +116,7 @@ public:
 
     // 电机反馈数据缓存
     std::mutex feedback_mutex_;
-    std::vector<std::string> motor_joint_names_;  // 从motor_feedback中获取的关节名称
+    std::vector<std::string> motor_joint_names_;
     bool feedback_received_;
 
     ControlImpl() : feedback_received_(false) {}
@@ -40,28 +134,25 @@ bool ROS2Communication::Initialize() {
     try {
         WLOG_DEBUG("[ROS2Communication] Initializing ROS2 communication");
         
-        // 初始化ROS2
         if (!rclcpp::ok()) {
             int argc = 0;
             char** argv = nullptr;
             rclcpp::init(argc, argv);
         }
         
-        // 创建ROS2节点
         node_ = std::make_shared<rclcpp::Node>("humanoid_control_module");
-        cmd_vel_pub_ = node_->create_publisher<TwistMsg>("/cmd_vel", 10);
-        joint_motion_pub_ = node_->create_publisher<MotorDriveMsg>("/motor_drive", 10);
+        cmd_vel_pub_ = node_->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
+        joint_motion_pub_ = node_->create_publisher<motor_interface::msg::MotorDrive>("/motor_drive", 10);
         
-        // 创建电机反馈订阅者（如果已设置回调）
+        // 创建电机反馈订阅者
         if (feedback_callback_) {
-            motor_feedback_sub_ = node_->create_subscription<MotorFeedbackMsg>(
+            motor_feedback_sub_ = node_->create_subscription<motor_interface::msg::MotorFeedback>(
                 "/motorFbk_topic", 10,
-                [this](const MotorFeedbackMsg::SharedPtr msg) {
-                    this->feedback_callback_(msg);
+                [this](const motor_interface::msg::MotorFeedback::SharedPtr msg) {
+                    this->feedback_callback_(msg.get());
                 });
         }
         
-        // 启动ROS2 spin线程
         ros_spin_thread_ = std::thread([this]() {
             WLOG_DEBUG("[ROS2Communication] Starting ROS2 spin thread");
             rclcpp::spin(node_);
@@ -82,12 +173,10 @@ void ROS2Communication::Cleanup() {
     WLOG_INFO("[ROS2Communication] Cleaning up ROS2 communication");
     
     if (ros_initialized_) {
-        // 关闭ROS2
         if (rclcpp::ok()) {
             rclcpp::shutdown();
         }
         
-        // 等待spin线程结束
         if (ros_spin_thread_.joinable()) {
             ros_spin_thread_.join();
         }
@@ -104,7 +193,7 @@ void ROS2Communication::PublishZeroVelocity() {
         return;
     }
     
-    auto zero_twist = std::make_unique<TwistMsg>();
+    auto zero_twist = std::make_unique<geometry_msgs::msg::Twist>();
     zero_twist->linear.x = 0.0;
     zero_twist->linear.y = 0.0;
     zero_twist->linear.z = 0.0;
@@ -126,7 +215,7 @@ void ROS2Communication::PublishJointCommand(const std::vector<std::string>& join
         return;
     }
     
-    auto motor_drive_msg = std::make_unique<MotorDriveMsg>();
+    auto motor_drive_msg = std::make_unique<motor_interface::msg::MotorDrive>();
     motor_drive_msg->joint = joints;
     motor_drive_msg->mode = modes;
     motor_drive_msg->pos = positions;
@@ -145,12 +234,11 @@ void ROS2Communication::PublishJointCommand(const std::vector<std::string>& join
 void ROS2Communication::SetMotorFeedbackCallback(MotorFeedbackCallback callback) {
     feedback_callback_ = std::move(callback);
     
-    // 如果已初始化，创建订阅者
     if (ros_initialized_ && node_) {
-        motor_feedback_sub_ = node_->create_subscription<MotorFeedbackMsg>(
+        motor_feedback_sub_ = node_->create_subscription<motor_interface::msg::MotorFeedback>(
             "/motorFbk_topic", 10,
-            [this](const MotorFeedbackMsg::SharedPtr msg) {
-                this->feedback_callback_(msg);
+            [this](const motor_interface::msg::MotorFeedback::SharedPtr msg) {
+                this->feedback_callback_(msg.get());
             });
     }
 }
@@ -166,20 +254,21 @@ bool FrameworkCommunication::Initialize() {
     try {
         WLOG_DEBUG("[FrameworkCommunication] Initializing framework communication");
         
-        // 创建通信库节点
-        CNodeOptions node_options;
+        humanoid_robot::framework::net::CNodeOptions node_options;
         node_options.enable_dds_discovery = true;
         node_options.enable_uds = true;
         node_options.heartbeat_interval_ms = 1000;
-        node_ = std::make_shared<CNode>("humanoid_control_module", node_options);
+        
+        node_ = std::make_shared<humanoid_robot::framework::net::CNode>("humanoid_control_module", node_options);
         
         // 配置发布者选项
-        CPublisherOptions pub_options;
+        humanoid_robot::framework::net::CPublisherOptions pub_options;
         pub_options.grpc_address = "0.0.0.0:0";  // 自动分配TCP端口
         pub_options.enable_dds_discovery = true;
         pub_options.enable_dual_server = true;   // 启用TCP+UDS双服务
+        
         // 创建cmd_vel发布者
-        cmd_vel_pub_ = node_->CreatePublisher<TwistMsg>("/cmd_vel", pub_options);
+        cmd_vel_pub_ = node_->CreatePublisher<geometry_msgs::msg::Twist>("/cmd_vel", pub_options);
         if (!cmd_vel_pub_) {
             WLOG_ERROR("[FrameworkCommunication] Failed to create cmd_vel publisher");
             return false;
@@ -187,26 +276,25 @@ bool FrameworkCommunication::Initialize() {
         
         // 创建motor_drive发布者
         pub_options.uds_path = "/tmp/humanoid_motor_drive.sock";
-        joint_motion_pub_ = node_->CreatePublisher<MotorDriveMsg>("/motor_drive", pub_options);
+        joint_motion_pub_ = node_->CreatePublisher<motor_interface::msg::MotorDrive>("/motor_drive", pub_options);
         if (!joint_motion_pub_) {
             WLOG_ERROR("[FrameworkCommunication] Failed to create joint_motion publisher");
             return false;
         }
         
-        // 创建电机反馈订阅者（如果已设置回调）
+        // 创建电机反馈订阅者
         if (feedback_callback_) {
-            CSubscriberOptions sub_options;
+            humanoid_robot::framework::net::CSubscriberOptions sub_options;
             sub_options.enable_dds_discovery = true;
             sub_options.prefer_uds = true;         // 优先使用UDS
             sub_options.thread_pool_size = 2;
             sub_options.reconnect_interval = std::chrono::seconds(2);
             
-            motor_feedback_sub_ = node_->CreateSubscriber<MotorFeedbackMsg>(
+            motor_feedback_sub_ = node_->CreateSubscriber<motor_interface::msg::MotorFeedback>(
                 "/motorFbk_topic",
-                [this](const MotorFeedbackMsg& msg) {
-                    // 转换为shared_ptr适配原有回调接口
-                    auto msg_ptr = std::make_shared<MotorFeedbackMsg>(msg);
-                    this->feedback_callback_(msg_ptr);
+                [this](const motor_interface::msg::MotorFeedback& msg) {
+                    auto msg_ptr = std::make_shared<motor_interface::msg::MotorFeedback>(msg);
+                    this->feedback_callback_(msg_ptr.get());
                 },
                 sub_options);
             
@@ -259,7 +347,7 @@ void FrameworkCommunication::PublishZeroVelocity() {
         return;
     }
     
-    TwistMsg zero_twist;
+    geometry_msgs::msg::Twist zero_twist;
     zero_twist.linear.x = 0.0;
     zero_twist.linear.y = 0.0;
     zero_twist.linear.z = 0.0;
@@ -284,7 +372,7 @@ void FrameworkCommunication::PublishJointCommand(const std::vector<std::string>&
         return;
     }
     
-    MotorDriveMsg motor_drive_msg;
+    motor_interface::msg::MotorDrive motor_drive_msg;
     motor_drive_msg.joint = joints;
     motor_drive_msg.mode = modes;
     motor_drive_msg.pos = positions;
@@ -307,17 +395,17 @@ void FrameworkCommunication::SetMotorFeedbackCallback(MotorFeedbackCallback call
     
     // 如果已初始化，创建订阅者
     if (initialized_ && node_) {
-        CSubscriberOptions sub_options;
+        humanoid_robot::framework::net::CSubscriberOptions sub_options;
         sub_options.enable_dds_discovery = true;
         sub_options.prefer_uds = true;
         sub_options.thread_pool_size = 2;
         sub_options.reconnect_interval = std::chrono::seconds(2);
         
-        motor_feedback_sub_ = node_->CreateSubscriber<MotorFeedbackMsg>(
+        motor_feedback_sub_ = node_->CreateSubscriber<motor_interface::msg::MotorFeedback>(
             "/motorFbk_topic",
-            [this](const MotorFeedbackMsg& msg) {
-                auto msg_ptr = std::make_shared<MotorFeedbackMsg>(msg);
-                this->feedback_callback_(msg_ptr);
+            [this](const motor_interface::msg::MotorFeedback& msg) {
+                auto msg_ptr = std::make_shared<motor_interface::msg::MotorFeedback>(msg);
+                this->feedback_callback_(msg_ptr.get());
             },
             sub_options);
         
@@ -339,12 +427,11 @@ bool ControlModule::Initialize() {
     try {
         WLOG_DEBUG("[Control] Initializing control module");
         
-        // 设置电机反馈回调
-        pImpl_->comm_->SetMotorFeedbackCallback([this](const MotorFeedbackMsg::SharedPtr msg) {
-            this->HandleMotorFeedback(msg);
+        // 设置电机反馈回调（使用lambda处理具体类型转换）
+        pImpl_->comm_->SetMotorFeedbackCallback([this](const void* msg_ptr) {
+            this->HandleMotorFeedback(msg_ptr);
         });
         
-        // 初始化通信模块
         if (!pImpl_->comm_->Initialize()) {
             WLOG_FATAL("[Control] Communication module initialization failed");
             return false;
@@ -359,6 +446,32 @@ bool ControlModule::Initialize() {
     }
 }
 
+bool ControlModule::IsRunning() {
+    if (!pImpl_) {
+        WLOG_ERROR("[Control] IsRunning: pImpl_ is null, module is not running");
+        return false;
+    }
+
+    if (!pImpl_->comm_) {
+        WLOG_WARN("[Control] IsRunning: Communication interface is null, module is not running");
+        return false;
+    }
+
+    // std::lock_guard<std::mutex> lock(pImpl_->feedback_mutex_);
+    // if (!pImpl_->initialized_) {
+    //     WLOG_WARN("[Control] IsRunning: Module not initialized yet");
+    //     return false;
+    // }
+
+    bool comm_is_running = false;
+#ifdef USE_ROS2_COMMUNICATION
+    comm_is_running = true;
+#else
+    comm_is_running = true;
+#endif
+    return comm_is_running;
+}
+
 void ControlModule::Cleanup() {
     WLOG_INFO("[Control] Cleaning up control module");
     
@@ -370,8 +483,8 @@ void ControlModule::Cleanup() {
 
 ModuleResult ControlModule::ProcessCommand(
     grpc::ServerContext* context, const int32_t& command_id,
-    const humanoid_robot::PB::common::Dictionary& input_data,
-    const humanoid_robot::PB::common::Dictionary& params) {
+    const PB_common::Dictionary& input_data,
+    const PB_common::Dictionary& params) {
     
     WLOG_DEBUG("[Control] Processing command: %d", command_id);
 
@@ -380,67 +493,67 @@ ModuleResult ControlModule::ProcessCommand(
     }
 
     switch (command_id) {
-        case ControlCommandCode::EMERGENCY_STOP:
-            return EmergencyStopROS(input_data, params);
-        case ControlCommandCode::GET_JOINT_INFO:
-            return GetJointInfoROS(input_data, params);
-        case ControlCommandCode::JOINT_MOTION:    
-            return JointMotionROS(input_data, params);
+        case ControlCommandCode::kEmergencyStop:
+            return EmergencyStop(input_data, params);
+        case ControlCommandCode::kGetJointInfo:
+            return GetJointInfo(input_data, params);
+        case ControlCommandCode::kJointMotion:    
+            return JointMotion(input_data, params);
         default:
             return ModuleResult::Error("Control", command_id, -100, "Unknown control command");
     }
 }
 
-ModuleResult ControlModule::EmergencyStopROS(
-    const humanoid_robot::PB::common::Dictionary& input_data,
-    const humanoid_robot::PB::common::Dictionary& params) {
+ModuleResult ControlModule::EmergencyStop(
+    const PB_common::Dictionary& input_data,
+    const PB_common::Dictionary& params) {
     
     WLOG_DEBUG("[Control] Executing emergency stop");
-    
+    // std::cout << "emergency stop received data" << std::endl;
     try {
         // 发布零速度命令
         PublishZeroVelocity();
         
         // 构造返回结果
-        auto result_data = std::make_unique<Dictionary>();
+        auto result_data = std::make_unique<PB_common::Dictionary>();
         auto result_kv = result_data->mutable_keyvaluelist();
+        PB_common::Variant pb_responce_str;
         
-        {
-            Variant var;
-            var.set_boolvalue(true);
-            result_kv->insert({"stop_success", var});
-        }
+        ResponceEmergencyStop responce_emergency_stop;
+        responce_emergency_stop.set_stop_feedback("急停执行成功");
         
-        {
-            Variant var;
-            const auto& kv_map = input_data.keyvaluelist();
-            auto reason_it = kv_map.find("reason");
-            std::string stop_reason = reason_it != kv_map.end() ? 
-                reason_it->second.stringvalue() : "Emergency stop command received";
-            var.set_stringvalue(stop_reason);
-            result_kv->insert({"stop_reason", var});
+        auto now = std::chrono::system_clock::now();
+        auto now_s = std::chrono::duration_cast<std::chrono::duration<double>>(
+            now.time_since_epoch()
+        );
+        // 调用 set_stop_timestamp() 传入时间戳值
+        responce_emergency_stop.set_stop_timestamp(now_s.count());
+
+        std::string pb_responce_serialized_str;
+        auto pb_serialize_result = responce_emergency_stop.SerializeToString(&pb_responce_serialized_str);
+        if (!pb_serialize_result) {
+            WLOG_ERROR("[Control] Failed to serialize responce_emergency_stop");
+            return ModuleResult::Error("Control",
+                                    ControlCommandCode::kEmergencyStop, -100,
+                                    "Failed to serialize responce_emergency_stop");
         }
-        
-        {
-            Variant var;
-            var.set_int64value(std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::system_clock::now().time_since_epoch()).count());
-            result_kv->insert({"stop_timestamp", var});
-        }
+
+        pb_responce_str.set_bytevalue(pb_responce_serialized_str);
+        result_kv->insert({"data", pb_responce_str});
         
         WLOG_DEBUG("[Control] Emergency stop completed successfully");
-        return ModuleResult::Success("Control", ControlCommandCode::EMERGENCY_STOP, 
+        return ModuleResult::Success("Control", ControlCommandCode::kEmergencyStop, 
                                    std::move(result_data));
         
     } catch (const std::exception& e) {
-        return ModuleResult::Error("Control", ControlCommandCode::EMERGENCY_STOP,
+        return ModuleResult::Error("Control", ControlCommandCode::kEmergencyStop,
                                  -4, "Exception in emergency stop: " + std::string(e.what()));
     }
 }
 
-ModuleResult ControlModule::GetJointInfoROS(
-    const humanoid_robot::PB::common::Dictionary& input_data,
-    const humanoid_robot::PB::common::Dictionary& params) {
+ModuleResult ControlModule::GetJointInfo(
+    const PB_common::Dictionary& input_data,
+    const PB_common::Dictionary& params) {
     
     WLOG_DEBUG("[Control] Getting joint information");
     
@@ -449,7 +562,7 @@ ModuleResult ControlModule::GetJointInfoROS(
         {
             std::lock_guard<std::mutex> lock(pImpl_->feedback_mutex_);
             if (!pImpl_->feedback_received_) {
-                return ModuleResult::Error("Control", ControlCommandCode::GET_JOINT_INFO,
+                return ModuleResult::Error("Control", ControlCommandCode::kGetJointInfo,
                                          -1, "No motor feedback received yet");
             }
         }
@@ -461,182 +574,177 @@ ModuleResult ControlModule::GetJointInfoROS(
         }
         
         if (joint_names.empty()) {
-            return ModuleResult::Error("Control", ControlCommandCode::GET_JOINT_INFO,
+            return ModuleResult::Error("Control", ControlCommandCode::kGetJointInfo,
                                      -2, "No joint information available");
         }
         
         // 构造返回结果
-        auto result_data = std::make_unique<Dictionary>();
+        auto result_data = std::make_unique<PB_common::Dictionary>();
         auto result_kv = result_data->mutable_keyvaluelist();
+        PB_common::Variant pb_responce_str;
         
-        // 关节名称（逗号分隔）
-        std::string joint_names_str;
-        for (size_t i = 0; i < joint_names.size(); ++i) {
-            if (i > 0) joint_names_str += ",";
-            joint_names_str += joint_names[i];
-        }
-        {
-            Variant var;
-            var.set_stringvalue(joint_names_str);
-            result_kv->insert({"joint_names", var});
-        }
+        ResponceGetJointInfo responce_get_joint_info;
         
-        // 关节数量
-        {
-            Variant var;
-            var.set_int32value(static_cast<int32_t>(joint_names.size()));
-            result_kv->insert({"joint_count", var});
-        }
-        
-        // 支持的模式
-        const std::vector<int32_t> supported_modes = {
-            MotionMode::VELOCITY, MotionMode::ABSOLUTE_POSITION, MotionMode::RELATIVE_POSITION
+        auto get_joint_supported_modes = [](const std::string& joint_name) -> std::vector<int32_t> {
+            return {MotionMode::ABSOLUTE_POSITION, MotionMode::RELATIVE_POSITION, MotionMode::VELOCITY};
         };
-        std::string modes_str;
-        for (size_t i = 0; i < supported_modes.size(); ++i) {
-            if (i > 0) modes_str += ",";
-            modes_str += std::to_string(supported_modes[i]);
+        
+        auto get_joint_limits = [](const std::string& joint_name) -> std::pair<double, double> {
+            return {-3.14, 3.14}; // (min_limit, max_limit)
+        };
+        
+        for (const auto& joint_name : joint_names) {
+            humanoid_robot::PB::sdk_service::control::JointDetail* joint_detail = responce_get_joint_info.add_joint_details();
+            
+            joint_detail->set_joint_name(joint_name);
+            
+            std::vector<int32_t> supported_modes = get_joint_supported_modes(joint_name);
+            for (int32_t mode : supported_modes) {
+                joint_detail->add_support_modes(mode);
+            }
+            
+            auto [min_limit, max_limit] = get_joint_limits(joint_name);
+            joint_detail->set_min_limit(min_limit);
+            joint_detail->set_max_limit(max_limit);
         }
         
-        // 每个关节的模式
-        for (const auto& joint : joint_names) {
-            Variant var;
-            var.set_stringvalue(modes_str);
-            result_kv->insert({"modes_" + joint, var});
+        std::string pb_responce_serialized_str;
+        auto pb_serialize_result = responce_get_joint_info.SerializeToString(&pb_responce_serialized_str);
+        if (!pb_serialize_result) {
+            WLOG_ERROR("[Control] Failed to serialize responce_get_joint_info");
+            return ModuleResult::Error("Control",
+                                    ControlCommandCode::kGetJointInfo, -100,
+                                    "Failed to serialize responce_get_joint_info");
         }
         
-        // 模式说明
-        {
-            Variant var;
-            var.set_stringvalue("1=绝对位置,2=相对位置,3=速度");
-            result_kv->insert({"mode_descriptions", var});
-        }
-        
+        // 将序列化后的 Protobuf 数据存入 Variant 的 bytevalue
+        pb_responce_str.set_bytevalue(pb_responce_serialized_str);
+        result_kv->insert({"data", pb_responce_str});
+
         WLOG_DEBUG("[Control] Get joint info completed, found %zu joints", joint_names.size());
-        return ModuleResult::Success("Control", ControlCommandCode::GET_JOINT_INFO, 
+        return ModuleResult::Success("Control", ControlCommandCode::kGetJointInfo, 
                                    std::move(result_data));
         
     } catch (const std::exception& e) {
-        return ModuleResult::Error("Control", ControlCommandCode::GET_JOINT_INFO,
+        return ModuleResult::Error("Control", ControlCommandCode::kGetJointInfo,
                                  -4, "Exception: " + std::string(e.what()));
     }
 }
 
-ModuleResult ControlModule::JointMotionROS(
-    const humanoid_robot::PB::common::Dictionary& input_data,
-    const humanoid_robot::PB::common::Dictionary& params) {
+ModuleResult ControlModule::JointMotion(
+    const PB_common::Dictionary& input_data,
+    const PB_common::Dictionary& params) {
     
     WLOG_DEBUG("[Control] Executing joint motion control");
     
     try {
-        const auto& kv_map = input_data.keyvaluelist();
-        
-        // 解析关节名称
-        auto joints_it = kv_map.find("joints");
-        if (joints_it == kv_map.end()) {
-            return ModuleResult::Error("Control", ControlCommandCode::JOINT_MOTION,
-                                     -1, "No joints specified");
+        auto data_it = input_data.keyvaluelist().find("request_joint_motion");
+        if (data_it == input_data.keyvaluelist().end()) {
+            WLOG_ERROR("[Control] Failed to find data in input_data");
+            return ModuleResult::Error("Control",
+                                    ControlCommandCode::kJointMotion, -100,
+                                    "Failed to find data in input_data");
         }
+        const PB_common::Variant &data_var = data_it->second;
+        humanoid_robot::PB::sdk_service::control::RequestJointMotion request_joint_motion;
+        auto protobuf_convert_status = request_joint_motion.ParseFromString(data_var.bytevalue());
+        if (!protobuf_convert_status) {
+            WLOG_ERROR("[Control] Failed to parse data to RequestJointMotion");
+            return ModuleResult::Error("Control",
+                                    ControlCommandCode::kJointMotion, -100,
+                                    "Failed to parse data to RequestJointMotion");
+        }
+        
         std::vector<std::string> joints;
-        std::string joints_str = joints_it->second.stringvalue();
-        size_t pos = 0;
-        while ((pos = joints_str.find(',')) != std::string::npos) {
-            joints.push_back(joints_str.substr(0, pos));
-            joints_str.erase(0, pos + 1);
-        }
-        if (!joints_str.empty()) joints.push_back(joints_str);
-        
-        // 解析模式
-        auto modes_it = kv_map.find("modes");
-        if (modes_it == kv_map.end()) {
-            return ModuleResult::Error("Control", ControlCommandCode::JOINT_MOTION,
-                                     -2, "No motion modes specified");
-        }
         std::vector<int32_t> modes;
-        std::string modes_str = modes_it->second.stringvalue();
-        pos = 0;
-        while ((pos = modes_str.find(',')) != std::string::npos) {
-            modes.push_back(std::stoi(modes_str.substr(0, pos)));
-            modes_str.erase(0, pos + 1);
-        }
-        if (!modes_str.empty()) modes.push_back(std::stoi(modes_str));
-        
-        // 解析位置
         std::vector<double> positions;
-        auto pos_it = kv_map.find("positions");
-        if (pos_it != kv_map.end()) {
-            std::string pos_str = pos_it->second.stringvalue();
-            pos = 0;
-            while ((pos = pos_str.find(',')) != std::string::npos) {
-                positions.push_back(std::stod(pos_str.substr(0, pos)));
-                pos_str.erase(0, pos + 1);
+        std::vector<double> velocities;
+        std::vector<double> torques;
+        
+        for (int i = 0; i < request_joint_motion.joint_commands_size(); ++i) {
+            const humanoid_robot::PB::sdk_service::control::JointCommand& joint_cmd = request_joint_motion.joint_commands(i);
+            
+            if (joint_cmd.joint_name().empty()) {
+                std::string error_msg = "Joint command at index " + std::to_string(i) + " has empty joint name";
+                WLOG_ERROR("[Control] %s", error_msg.c_str());
+                return ModuleResult::Error("Control",
+                                        ControlCommandCode::kJointMotion, -2,
+                                        error_msg);
             }
-            if (!pos_str.empty()) positions.push_back(std::stod(pos_str));
+            if (joint_cmd.motion_mode() == humanoid_robot::PB::sdk_service::control::JOINT_MODE_UNSPECIFIED) {
+                std::string error_msg = "Joint command for '" + joint_cmd.joint_name() + "' has unspecified motion mode";
+                WLOG_ERROR("[Control] %s", error_msg.c_str());
+                return ModuleResult::Error("Control",
+                                        ControlCommandCode::kJointMotion, -2,
+                                        error_msg);
+            }
+            
+            joints.push_back(joint_cmd.joint_name());
+            modes.push_back(static_cast<int32_t>(joint_cmd.motion_mode())); // 枚举转 int32_t
+            
+            double target_value = joint_cmd.target_value();
+            switch (joint_cmd.motion_mode()) {
+                case humanoid_robot::PB::sdk_service::control::JOINT_MODE_ABSOLUTE_POSITION:
+                case humanoid_robot::PB::sdk_service::control::JOINT_MODE_RELATIVE_POSITION:
+                    positions.push_back(target_value);
+                    velocities.push_back(joint_cmd.max_velocity()); // 最大速度
+                    torques.push_back(0.0); // 位置/速度模式下力矩为 0
+                    break;
+                case humanoid_robot::PB::sdk_service::control::JOINT_MODE_VELOCITY:
+                    positions.push_back(0.0); // 速度模式下位置为 0
+                    velocities.push_back(target_value);
+                    torques.push_back(0.0);
+                    break;
+                case humanoid_robot::PB::sdk_service::control::JOINT_MODE_TORQUE:
+                    positions.push_back(0.0); // 力矩模式下位置为 0
+                    velocities.push_back(0.0); // 力矩模式下速度为 0
+                    torques.push_back(target_value);
+                    break;
+                default:
+                    positions.push_back(0.0);
+                    velocities.push_back(0.0);
+                    torques.push_back(0.0);
+                    break;
+            }
         }
         
-        // 解析速度
-        std::vector<double> velocities(joints.size(), 0.0);
-        auto vel_it = kv_map.find("velocities");
-        if (vel_it != kv_map.end()) {
-            std::string vel_str = vel_it->second.stringvalue();
-            pos = 0;
-            size_t idx = 0;
-            while ((pos = vel_str.find(',')) != std::string::npos && idx < joints.size()) {
-                velocities[idx++] = std::stod(vel_str.substr(0, pos));
-                vel_str.erase(0, pos + 1);
-            }
-            if (!vel_str.empty() && idx < joints.size()) {
-                velocities[idx] = std::stod(vel_str);
-            }
-        }
-        
-        // 解析力矩
-        std::vector<double> torques(joints.size(), 0.0);
-        auto tq_it = kv_map.find("torques");
-        if (tq_it != kv_map.end()) {
-            std::string tq_str = tq_it->second.stringvalue();
-            pos = 0;
-            size_t idx = 0;
-            while ((pos = tq_str.find(',')) != std::string::npos && idx < joints.size()) {
-                torques[idx++] = std::stod(tq_str.substr(0, pos));
-                tq_str.erase(0, pos + 1);
-            }
-            if (!tq_str.empty() && idx < joints.size()) {
-                torques[idx] = std::stod(tq_str);
-            }
-        }
-        
-        // 验证参数数量
         if (joints.size() != modes.size() || joints.size() != positions.size() ||
             joints.size() != velocities.size() || joints.size() != torques.size()) {
-            return ModuleResult::Error("Control", ControlCommandCode::JOINT_MOTION,
+            WLOG_ERROR("[Control] Parameter count mismatch after parsing joint commands");
+            return ModuleResult::Error("Control", ControlCommandCode::kJointMotion,
                                      -3, "Parameter count mismatch");
         }
-        
         // 发布关节命令
         PublishJointCommand(joints, modes, positions, velocities, torques);
         
         // 构造返回结果
-        auto result_data = std::make_unique<Dictionary>();
+        auto result_data = std::make_unique<PB_common::Dictionary>();
         auto result_kv = result_data->mutable_keyvaluelist();
+        PB_common::Variant pb_responce_str;
         
-        {
-            Variant var;
-            var.set_boolvalue(true);
-            result_kv->insert({"motion_success", var});
+        ResponceJointMotion responce_joint_motion;
+        std::string execute_info = "All " + std::to_string(joints.size()) + " joints executed successfully";
+        responce_joint_motion.set_execute_info(execute_info);
+
+        std::string pb_responce_serialized_str;
+        auto pb_serialize_result = responce_joint_motion.SerializeToString(&pb_responce_serialized_str);
+        if (!pb_serialize_result) {
+            WLOG_ERROR("[Control] Failed to serialize responce_joint_motion");
+            return ModuleResult::Error("Control",
+                                    ControlCommandCode::kJointMotion, -101,
+                                    "Failed to serialize responce_joint_motion");
         }
-        {
-            Variant var;
-            var.set_int32value(static_cast<int32_t>(joints.size()));
-            result_kv->insert({"controlled_joints_count", var});
-        }
+        
+        
+        pb_responce_str.set_bytevalue(pb_responce_serialized_str);
+        result_kv->insert({"data", pb_responce_str});
         
         WLOG_DEBUG("[Control] Joint motion completed for %zu joints", joints.size());
-        return ModuleResult::Success("Control", ControlCommandCode::JOINT_MOTION, 
+        return ModuleResult::Success("Control", ControlCommandCode::kJointMotion, 
                                    std::move(result_data));
         
     } catch (const std::exception& e) {
-        return ModuleResult::Error("Control", ControlCommandCode::JOINT_MOTION,
+        return ModuleResult::Error("Control", ControlCommandCode::kJointMotion,
                                  -4, "Exception: " + std::string(e.what()));
     }
 }
@@ -661,9 +769,12 @@ void ControlModule::PublishJointCommand(const std::vector<std::string>& joints,
     }
 }
 
-void ControlModule::HandleMotorFeedback(const MotorFeedbackMsg::SharedPtr msg) {
+void ControlModule::HandleMotorFeedback(const void* msg_ptr) {
     try {
-        const auto& joints = msg->joint;
+        const motor_interface::msg::MotorFeedback* typed_msg = 
+            reinterpret_cast<const motor_interface::msg::MotorFeedback*>(msg_ptr);
+
+        const auto& joints = typed_msg->joint;
         if (joints.empty()) {
             WLOG_WARN("[Control] Received motor feedback with empty joint list");
             return;
@@ -673,19 +784,7 @@ void ControlModule::HandleMotorFeedback(const MotorFeedbackMsg::SharedPtr msg) {
         pImpl_->motor_joint_names_ = joints;
         pImpl_->feedback_received_ = true;
         
-        // 日志输出
-        const auto& positions = msg->pos;
-        const auto& velocities = msg->vel;
-        const auto& torques = msg->tq;
-        const auto& errors = msg->err;
-        
         WLOG_DEBUG("[Control] Received motor feedback for %zu joints", joints.size());
-        for (size_t i = 0; i < joints.size(); ++i) {
-            if (i < positions.size() && i < velocities.size() && i < torques.size() && i < errors.size()) {
-                WLOG_DEBUG("[Control] Joint %s: pos=%.3f, vel=%.3f, tq=%.3f, err=%d",
-                          joints[i].c_str(), positions[i], velocities[i], torques[i], errors[i]);
-            }
-        }
         
     } catch (const std::exception& e) {
         WLOG_ERROR("[Control] Exception in HandleMotorFeedback: %s", e.what());
