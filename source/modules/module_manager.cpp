@@ -19,6 +19,7 @@
 #include "common/service.pb.h"
 #include "modules/navigation_module.h"
 #include "modules/perception_module.h"
+#include "modules/control_module.h"
 #include "perception/perception_request_response.pb.h"
 #include "sdk_service/common/service.pb.h"
 
@@ -33,6 +34,9 @@ using NavigationCommandCode =
 using PerceptionCommandCode =
     humanoid_robot::PB::sdk_service::common::PerceptionCommandCode;
 
+using ControlCommandCode =
+    humanoid_robot::PB::sdk_service::common::ControlCommandCode;
+
 ModuleManager::ModuleManager()
     : stop_check_thread_(false) // ********** 初始化原子变量 **********
 {
@@ -46,10 +50,15 @@ ModuleManager::ModuleManager()
   //     perception_module;
 
   auto navigation_module = std::make_shared<NavigationModule>();
+  auto control_module = std::make_shared<ControlModule>(); 
   if (!navigation_module) {
     WLOG_FATAL("[ModuleManager] Failed to create NavigationModule");
   }
+  if (!control_module) {
+    WLOG_FATAL("[ModuleManager] Failed to create control_module");
+  }
   modules_.insert({"Navigation", navigation_module});
+  modules_.insert({"Control", control_module});
   std::vector<NavigationCommandCode> navigation_commands = {
       NavigationCommandCode::kGetCurrentPose,
       NavigationCommandCode::kGetGridMap2D,
@@ -63,9 +72,17 @@ ModuleManager::ModuleManager()
     command_to_module_[command] = navigation_module;
   }
 
+  std::vector<ControlCommandCode> control_commands = {
+      ControlCommandCode::kEmergencyStop,
+      ControlCommandCode::kGetJointInfo,
+      ControlCommandCode::kJointMotion,
+  };
+  for (auto command : control_commands) {
+    command_to_module_[command] = control_module;
+  }
   // ********** 启动定时检查线程 **********
   check_thread_ = std::thread(&ModuleManager::ModulesRunningCheck, this);
-  // std::cout << "[ModuleManager] All modules initialized" << std::endl;
+  std::cout << "[ModuleManager] All modules initialized" << std::endl;
   WLOG_DEBUG("[ModuleManager] All modules initialized");
 }
 

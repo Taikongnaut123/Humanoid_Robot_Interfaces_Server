@@ -11,7 +11,7 @@ add_executable(${TARGET_NAME}
     ../source/modules/module_base.cpp
     # ../source/modules/perception_module.cpp
     ../source/modules/navigation_module.cpp
-
+    ../source/modules/control_module.cpp
 )
 
 # 添加调试选项
@@ -32,7 +32,7 @@ find_package(chric_communication_v2_dds_discovery REQUIRED)
 find_package(chric_protobuf_perception REQUIRED)
 find_package(chric_utils_ros_proto_converter REQUIRED)
 find_package(chric_utils_message_serializer REQUIRED)
-
+find_package(motor_interface REQUIRED)
 
 ament_target_dependencies(${TARGET_NAME}
     chric_common_log
@@ -47,6 +47,7 @@ ament_target_dependencies(${TARGET_NAME}
     chric_communication_v2_dds_discovery
     chric_utils_ros_proto_converter
     chric_utils_message_serializer
+    motor_interface
 )
 
 target_link_libraries(${TARGET_NAME}

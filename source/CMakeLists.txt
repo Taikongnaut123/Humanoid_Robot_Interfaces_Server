@@ -9,6 +9,7 @@ add_library(${TARGET_NAME} SHARED
     # modules/perception_module.cpp
     modules/module_manager.cpp
     modules/navigation_module.cpp
+    modules/control_module.cpp
 )
 
 message(STATUS "COMMON_INCLUDE_DIR: ${COMMON_INCLUDE_DIR}")
@@ -24,7 +25,7 @@ find_package(chric_communication_v2_net REQUIRED)
 find_package(chric_communication_v2_dds_discovery REQUIRED)
 find_package(chric_protobuf_perception REQUIRED)
 find_package(chric_utils REQUIRED)
-
+find_package(motor_interface REQUIRED)
 
 ament_target_dependencies(${TARGET_NAME}
     chric_common_log
@@ -38,6 +39,7 @@ ament_target_dependencies(${TARGET_NAME}
     chric_communication_v2_net
     chric_communication_v2_dds_discovery
     chric_utils
+    motor_interface
 )
 
 target_link_libraries(${TARGET_NAME}
@@ -61,3 +63,4 @@ install(TARGETS ${TARGET_NAME}
     ARCHIVE DESTINATION sdk_server/lib
     RUNTIME DESTINATION sdk_server/bin
 )
+
