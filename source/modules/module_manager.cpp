@@ -54,7 +54,7 @@ ModuleManager::ModuleManager()
       NavigationCommandCode::kGetCurrentPose,
       NavigationCommandCode::kGetGridMap2D,
       NavigationCommandCode::kNavigationTo,
-      NavigationCommandCode::KCancelNavigationTask,
+      NavigationCommandCode::kCancelNavigationTask,
       NavigationCommandCode::kGetRemainingPathDistance,
       NavigationCommandCode::kStartCharging,
       NavigationCommandCode::kStopCharging,
@@ -83,6 +83,7 @@ ModuleManager::~ModuleManager() {
 // ********** 定时检查循环函数（核心逻辑）**********
 void ModuleManager::ModulesRunningCheck() {
   // 检查间隔：5秒
+  // return;
   const std::chrono::seconds check_interval(5);
 
   while (!stop_check_thread_) {

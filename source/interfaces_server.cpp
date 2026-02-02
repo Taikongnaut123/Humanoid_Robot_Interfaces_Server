@@ -134,7 +134,7 @@ grpc::Status InterfaceServiceImpl::Send(
     auto params_ptr = stable_request.mutable_params();
     // 调用模块管理器执行命令
     auto result = module_manager_->ExecuteCommand(context, command_id, data_ref,
-                                                  *params_ptr, 10000);
+                                                  *params_ptr, 30000);
     SendResponse response;
 
     auto ret = response.mutable_ret();
@@ -639,7 +639,7 @@ bool InterfacesServer::Start(const std::string &server_address) {
 void InterfacesServer::Stop() {
   if (server_) {
     WLOG_DEBUG("Shutting down gRPC server...");
-    server_->Shutdown(); // 停止接受新连接
+    server_->Shutdown(std::chrono::system_clock::now() + std::chrono::seconds(2)); // 停止接受新连接
   }
 }
 

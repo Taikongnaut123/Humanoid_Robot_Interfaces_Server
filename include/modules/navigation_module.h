@@ -21,64 +21,28 @@ namespace humanoid_robot {
 namespace server {
 namespace modules {
 class NavigationModule : public ModuleBase {
-public:
+ public:
   NavigationModule();
   virtual ~NavigationModule();
   bool IsRunning() override;
 
-protected:
+ protected:
   bool Initialize() override;
   void Cleanup() override;
 
-  ModuleResult
-  ProcessCommand(grpc::ServerContext *context, const int32_t &command_id,
-                 const humanoid_robot::PB::common::Dictionary &input_data,
-                 const humanoid_robot::PB::common::Dictionary &params) override;
+  ModuleResult ProcessCommand(
+      grpc::ServerContext* context, const int32_t& command_id,
+      const humanoid_robot::PB::common::Dictionary& input_data,
+      const humanoid_robot::PB::common::Dictionary& params) override;
 
-private:
-  // 获取机器人当前位姿
-  ModuleResult
-  GetCurrentPose(const humanoid_robot::PB::common::Dictionary &input_data,
-                 const humanoid_robot::PB::common::Dictionary &params);
-
-  // 获取2D栅格地图
-  ModuleResult
-  GetGridMap2D(const humanoid_robot::PB::common::Dictionary &input_data,
-               const humanoid_robot::PB::common::Dictionary &params);
-
-  // 开始导航
-  ModuleResult
-  NavigationTo(const humanoid_robot::PB::common::Dictionary &input_data,
-               const humanoid_robot::PB::common::Dictionary &params);
-
-  // 取消当前导航任务
-  ModuleResult
-  CancelNavigationTask(const humanoid_robot::PB::common::Dictionary &input_data,
-                       const humanoid_robot::PB::common::Dictionary &params);
-
-  // 获取剩余路径距离
-  ModuleResult GetRemainingPathDistance(
-      const humanoid_robot::PB::common::Dictionary &input_data,
-      const humanoid_robot::PB::common::Dictionary &params);
-
-  // 开始充电
-  ModuleResult
-  StartCharging(const humanoid_robot::PB::common::Dictionary &input_data,
-                const humanoid_robot::PB::common::Dictionary &params);
-
-  // 结束充电
-  ModuleResult
-  StopCharging(const humanoid_robot::PB::common::Dictionary &input_data,
-               const humanoid_robot::PB::common::Dictionary &params);
-
-private:
+ private:
   // Private implementation details
   class NavigationImpl;
   std::unique_ptr<NavigationImpl> pImpl_;
-  NavigationModule(const NavigationModule &) = delete;
-  NavigationModule &operator=(const NavigationModule &) = delete;
+  NavigationModule(const NavigationModule&) = delete;
+  NavigationModule& operator=(const NavigationModule&) = delete;
 };
-} // namespace modules
-} // namespace server
-} // namespace humanoid_robot
-#endif // HUMANOID_ROBOT_NAVIGATION_MODULE_H
+}  // namespace modules
+}  // namespace server
+}  // namespace humanoid_robot
+#endif  // HUMANOID_ROBOT_NAVIGATION_MODULE_H

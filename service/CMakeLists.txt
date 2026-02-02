@@ -15,11 +15,12 @@ add_executable(${TARGET_NAME}
 )
 
 # 添加调试选项
-# target_compile_options(${TARGET_NAME} PRIVATE -g)
+target_compile_options(${TARGET_NAME} PRIVATE -g)
 
 # find_package(grpc++ REQUIRED)
 
 find_package(loc_msg REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
 
 find_package(chric_common_log REQUIRED)
@@ -43,6 +44,7 @@ ament_target_dependencies(${TARGET_NAME}
 
     loc_msg
     rclcpp
+    std_msgs
     chric_communication_v2_net
     chric_communication_v2_dds_discovery
     chric_utils_ros_proto_converter

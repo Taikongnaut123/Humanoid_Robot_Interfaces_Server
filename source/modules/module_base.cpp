@@ -88,6 +88,8 @@ void ModuleBase::Stop() {
 bool ModuleBase::Restart() {
   WLOG_DEBUG("[%s] Restarting module...", module_name_.c_str());
   Stop();
+  // sleep 2000ms
+  std::this_thread::sleep_for(std::chrono::milliseconds(2000));
   return Start();
 }
 
