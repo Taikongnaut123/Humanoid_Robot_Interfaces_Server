@@ -31,6 +31,7 @@ public:
 
 protected:
   bool Initialize() override;
+  // bool IsRunning() override;
   void Cleanup() override;
 
   ModuleResult
@@ -40,19 +41,19 @@ protected:
 
 private:
   // 视觉检测
-  ModuleResult perceive(
+  ModuleResult Perception(
       // grpc::ServerContext *&context,
       const humanoid_robot::PB::common::Dictionary &input_data,
       const humanoid_robot::PB::common::Dictionary &params);
 
   // 音频分析
-  ModuleResult detect(
+  ModuleResult Detection(
       // grpc::ServerContext *&context,
       const humanoid_robot::PB::common::Dictionary &input_data,
       const humanoid_robot::PB::common::Dictionary &params);
 
   // 触觉感知
-  ModuleResult divide(
+  ModuleResult Division(
       // grpc::ServerContext *&context,
       const humanoid_robot::PB::common::Dictionary &input_data,
       const humanoid_robot::PB::common::Dictionary &params);

@@ -14,16 +14,35 @@
 #include "Log/wlog.hpp"
 #include "common/service.pb.h"
 #include "grpcpp/grpcpp.h"
-#include "perception/perception_request_response.pb.h"
-#include "perception/perception_service.grpc.pb.h"
+#include "sdk_service/common/service.pb.h"
+#include "sdk_service/perception/perception_service.grpc.pb.h"
+#include "sdk_service/perception/request_detection.pb.h"
+#include "sdk_service/perception/request_division.pb.h"
+#include "sdk_service/perception/request_perception.pb.h"
+#include "sdk_service/perception/response_detection.pb.h"
+#include "sdk_service/perception/response_division.pb.h"
+#include "sdk_service/perception/response_perception.pb.h"
+#include "sdk_service/perception/response_status.pb.h"
 
-using namespace humanoid_robot;
-using namespace humanoid_robot::PB::perception;
-using namespace humanoid_robot::PB::common;
+using namespace humanoid_robot::PB::sdk_service::common;
+namespace PB_common = humanoid_robot::PB::common;
 
 namespace humanoid_robot {
 namespace server {
 namespace modules {
+
+using ResponseDetection = humanoid_robot::PB::sdk_service::perception::ResponseDetection;
+using ReDetection = humanoid_robot::PB::sdk_service::perception::Detection;
+
+using ResponseDivision = humanoid_robot::PB::sdk_service::perception::ResponseDivision;
+using ReDivision = humanoid_robot::PB::sdk_service::perception::Division;
+
+using ResponsePerception = humanoid_robot::PB::sdk_service::perception::ResponsePerception;
+using RePerception = humanoid_robot::PB::sdk_service::perception::Perception;
+
+using PerceptionResStatus = humanoid_robot::PB::sdk_service::perception::ResponseStatus;
+using PerceptionCommandCode = humanoid_robot::PB::sdk_service::common::PerceptionCommandCode;
+using PerceptionService = humanoid_robot::PB::sdk_service::perception::PerceptionService;
 
 class PerceptionModule::PerceptionImpl {
 public:
@@ -95,6 +114,15 @@ bool PerceptionModule::Initialize() {
   return true;
 }
 
+// bool PerceptionModule::IsRunning() {
+//   if (!pImpl_->service_client_)
+//     return false;
+//   auto client_connected =
+//       pImpl_->service_client_->WaitForService(std::chrono::seconds(3));
+//   return client_connected;
+//   return true;
+// }
+
 void PerceptionModule::Cleanup() {
   WLOG_INFO("Cleaning up perception resources...");
 
@@ -110,16 +138,16 @@ ModuleResult PerceptionModule::ProcessCommand(
     const humanoid_robot::PB::common::Dictionary &params) {
   WLOG_DEBUG("Processing command in PerceptionModule: %d", command_id);
 
-  if (command_id == humanoid_robot::PB::perception::GET_PERCEPTION_RESULT) {
-    return perceive(input_data, params);
+  if (command_id == PerceptionCommandCode::kPerception) {
+    return Perception(input_data, params);
     // return perceive(context, input_data, params);
   } else if (command_id ==
-             humanoid_robot::PB::perception::GET_DETECTION_RESULT) {
-    return detect(input_data, params);
+             PerceptionCommandCode::kDetection) {
+    return Detection(input_data, params);
     // return detect(context, input_data, params);
   } else if (command_id ==
-             humanoid_robot::PB::perception::GET_DIVISION_RESULT) {
-    return divide(input_data, params);
+             PerceptionCommandCode::kDivision) {
+    return Division(input_data, params);
     // return divide(context, input_data, params);
   } else {
     return ModuleResult::Error("Perception", command_id, -100,
@@ -127,46 +155,56 @@ ModuleResult PerceptionModule::ProcessCommand(
   }
 }
 
-ModuleResult PerceptionModule::perceive(
+ModuleResult PerceptionModule::Perception(
     // grpc::ServerContext *&context,
     const humanoid_robot::PB::common::Dictionary &input_data,
     const humanoid_robot::PB::common::Dictionary &params) {
   WLOG_DEBUG("Processing perception command");
   if (!pImpl_->connected_ || !pImpl_->stub_) {
     return ModuleResult::Error(
-        "Perception", humanoid_robot::PB::perception::GET_PERCEPTION_RESULT, -1,
+        "Perception", PerceptionCommandCode::kPerception, -1,
         "Perception service not connected");
   }
 
   try {
     // 从input_data中提取图像数据
-    auto &kv_map = input_data.keyvaluelist();
-    auto image_it = kv_map.find("image");
-    if (image_it == kv_map.end()) {
-      return ModuleResult::Error(
-          "Perception", humanoid_robot::PB::perception::GET_PERCEPTION_RESULT,
-          -2, "No image data provided");
+    auto data_it = input_data.keyvaluelist().find("request_perception");
+    if (data_it == input_data.keyvaluelist().end()) {
+        WLOG_ERROR("[Perception] Failed to find data in input_data");
+        return ModuleResult::Error("Perception",
+                                PerceptionCommandCode::kPerception, -100,
+                                "Failed to find data in input_data");
+    }
+    const PB_common::Variant &data_var = data_it->second;
+    humanoid_robot::PB::sdk_service::perception::RequestPerception request_perception;
+    auto protobuf_convert_status = request_perception.ParseFromString(data_var.bytevalue());
+    if (!protobuf_convert_status) {
+        WLOG_ERROR("[Perception] Failed to parse data to RequestPerception");
+        return ModuleResult::Error("Perception",
+                                PerceptionCommandCode::kPerception, -100,
+                                "Failed to parse data to RequestPerception");
+    }
+    // auto image_it = data_it.image();
+   const humanoid_robot::PB::common::Image &image_from_request = request_perception.image();
+    
+    if (!request_perception.has_image()) {
+        WLOG_ERROR("[Perception] RequestPerception has no valid Image field");
+        return ModuleResult::Error("Perception",
+                                PerceptionCommandCode::kPerception, -101,
+                                "RequestPerception missing Image field");
     }
 
-    // 构造图像请求
     humanoid_robot::PB::common::Image image_request;
+    image_request.CopyFrom(image_from_request); // 拷贝原始 Image 中的所有有效数据
 
-    // 如果是Image类型的Variant
-    if (image_it->second.value_case() ==
-        humanoid_robot::PB::common::Variant::KImageValue) {
-      image_request = image_it->second.imagevalue();
-    } else {
-      // 假设是字符串格式的图像数据
-      image_request.set_img(image_it->second.bytevalue());
-      image_request.set_requiresmasks(true);
+    image_request.set_requiresmasks(true);
 
-      // 设置时间戳
-      auto now = std::chrono::system_clock::now();
-      auto timestamp = std::chrono::duration_cast<std::chrono::microseconds>(
-                           now.time_since_epoch())
-                           .count();
-      image_request.set_timestamp(std::to_string(timestamp));
-    }
+    auto now = std::chrono::system_clock::now();
+    auto timestamp = std::chrono::duration_cast<std::chrono::microseconds>(
+                          now.time_since_epoch())
+                          .count();
+    image_request.set_timestamp(std::to_string(timestamp));
+
 
     // 创建客户端上下文并设置超时
     grpc::ClientContext context;
@@ -179,7 +217,7 @@ ModuleResult PerceptionModule::perceive(
     // 发送图像
     if (!stream->Write(image_request)) {
       return ModuleResult::Error(
-          "Perception", humanoid_robot::PB::perception::GET_PERCEPTION_RESULT,
+          "Perception", PerceptionCommandCode::kPerception,
           -3, "Failed to send image to perception service");
     }
 
@@ -187,8 +225,9 @@ ModuleResult PerceptionModule::perceive(
     stream->WritesDone();
 
     // 读取响应
-    humanoid_robot::PB::perception::Perception response;
-    std::vector<humanoid_robot::PB::perception::Perception> responses;
+    RePerception response;
+    std::vector<RePerception> responses;
+    ResponsePerception final_response;
 
     while (stream->Read(&response)) {
       responses.push_back(response);
@@ -198,372 +237,246 @@ ModuleResult PerceptionModule::perceive(
     grpc::Status status = stream->Finish();
     if (!status.ok()) {
       return ModuleResult::Error(
-          "Perception", humanoid_robot::PB::perception::GET_PERCEPTION_RESULT,
+          "Perception", PerceptionCommandCode::kPerception,
           status.error_code(),
           "Perception service error: " + status.error_message());
     }
 
-    // 构造返回结果
-    auto result_data =
-        std::make_unique<humanoid_robot::PB::common::Dictionary>();
-    auto result_kv_map = result_data->mutable_keyvaluelist();
+    auto result_data = std::make_unique<PB_common::Dictionary>();
+    auto result_kv = result_data->mutable_keyvaluelist();
+    PB_common::Variant pb_response_str;
 
-    // 添加检测结果数量
-    {
-      humanoid_robot::PB::common::Variant var;
-      var.set_int32value(responses.size());
-      result_kv_map->insert({"perception_count", var});
-    }
-
-    // 添加感知结果
     for (size_t i = 0; i < responses.size(); ++i) {
-      std::string key = "perception_" + std::to_string(i);
-      humanoid_robot::PB::common::Variant var;
-      // var.set_type(humanoid_robot::PB::common::Variant::KPerceptionRowValue);
-
-      // 这里需要根据实际的Perception消息结构来转换
-      // 暂时用字符串表示
-      var.set_stringvalue("perception_result_" + std::to_string(i));
-      result_kv_map->insert({key, var});
-
-      {
-        auto timestamp = responses[i].timestamp();
-        humanoid_robot::PB::common::Variant timestamp_var;
-        timestamp_var.set_stringvalue(timestamp);
-        result_kv_map->insert(
-            {"timestamp_" + std::to_string(i), timestamp_var});
-      }
-
-      {
-        auto rows = responses[i].rows();
-        for (auto row : rows) {
-          {
-            auto bbox = row.bbox();
-            humanoid_robot::PB::common::Variant bbox_var;
-            // bbox_var.set_type(humanoid_robot::PB::common::Variant::KBBoxValue);
-            *bbox_var.mutable_bboxvalue() = bbox;
-            result_kv_map->insert({"bbox_" + std::to_string(i), bbox_var});
-          }
-
-          {
-            auto track_id = row.trackid();
-            humanoid_robot::PB::common::Variant track_id_var;
-            track_id_var.set_stringvalue(track_id);
-            result_kv_map->insert(
-                {"track_id_" + std::to_string(i), track_id_var});
-          }
-
-          {
-            auto conf = row.conf();
-            humanoid_robot::PB::common::Variant conf_var;
-            conf_var.set_floatvalue(conf);
-            result_kv_map->insert({"conf_" + std::to_string(i), conf_var});
-          }
-
-          {
-            auto cls = row.cls();
-            humanoid_robot::PB::common::Variant cls_var;
-            cls_var.set_stringvalue(cls);
-            result_kv_map->insert({"cls_" + std::to_string(i), cls_var});
-          }
-          {
-            auto ismove = row.ismove();
-            humanoid_robot::PB::common::Variant ismove_var;
-            ismove_var.set_boolvalue(ismove);
-            result_kv_map->insert({"ismove_" + std::to_string(i), ismove_var});
-          }
-        }
-      }
+      RePerception* temp_perception = final_response.add_singel_perception();
+      temp_perception->CopyFrom(responses[i]);
+    } 
+    std::string pb_response_serialized_str;
+    auto pb_serialize_result = final_response.SerializeToString(&pb_response_serialized_str);
+    if (!pb_serialize_result) {
+        WLOG_ERROR("[Perception] Failed to serialize response_perception");
+        return ModuleResult::Error("Perception",
+                                PerceptionCommandCode::kPerception, -100,
+                                "Failed to serialize response_perception");
     }
 
-    WLOG_DEBUG("[Perception] Successfully processed perception request, got %d "
+    pb_response_str.set_bytevalue(pb_response_serialized_str);
+    result_kv->insert({"data", pb_response_str});
+    WLOG_DEBUG("[Perception] Successfully processed perception request, got %zd "
                "results",
                responses.size());
 
     return ModuleResult::Success(
-        "Perception", humanoid_robot::PB::perception::GET_PERCEPTION_RESULT,
+        "Perception", PerceptionCommandCode::kPerception,
         std::move(result_data));
   } catch (const std::exception &e) {
     return ModuleResult::Error(
-        "Perception", humanoid_robot::PB::perception::GET_PERCEPTION_RESULT, -4,
+        "Perception", PerceptionCommandCode::kPerception, -4,
         "Exception in perception processing: " + std::string(e.what()));
   }
 }
 
-ModuleResult PerceptionModule::detect(
+ModuleResult PerceptionModule::Detection(
     // grpc::ServerContext *&context,
     const humanoid_robot::PB::common::Dictionary &input_data,
     const humanoid_robot::PB::common::Dictionary &params) {
   WLOG_DEBUG("Processing detection command");
   if (!pImpl_->connected_ || !pImpl_->stub_) {
     return ModuleResult::Error(
-        "Perception", humanoid_robot::PB::perception::GET_DETECTION_RESULT, -1,
+        "Perception", PerceptionCommandCode::kDetection, -1,
         "Perception service not connected");
   }
 
   try {
     // 从input_data中提取图像数据
-    auto &kv_map = input_data.keyvaluelist();
-    auto image_it = kv_map.find("image");
-    if (image_it == kv_map.end()) {
-      return ModuleResult::Error(
-          "Perception", humanoid_robot::PB::perception::GET_DETECTION_RESULT,
-          -2, "No image data provided");
+    auto data_it = input_data.keyvaluelist().find("request_detection");
+    if (data_it == input_data.keyvaluelist().end()) {
+        WLOG_ERROR("[Perception] Failed to find data in input_data");
+        return ModuleResult::Error("Perception",
+                                PerceptionCommandCode::kDetection, -100,
+                                "Failed to find data in input_data");
+    }
+    const PB_common::Variant &data_var = data_it->second;
+    humanoid_robot::PB::sdk_service::perception::RequestDetection request_detection;
+    auto protobuf_convert_status = request_detection.ParseFromString(data_var.bytevalue());
+    if (!protobuf_convert_status) {
+        WLOG_ERROR("[Perception] Failed to parse data to RequestDetection");
+        return ModuleResult::Error("Perception",
+                                PerceptionCommandCode::kDetection, -100,
+                                "Failed to parse data to RequestDetection");
+    }
+    // auto image_it = data_it.image();
+   const humanoid_robot::PB::common::Image &image_from_request = request_detection.image();
+    
+    if (!request_detection.has_image()) {
+        WLOG_ERROR("[Perception] RequestDetection has no valid Image field");
+        return ModuleResult::Error("Perception",
+                                PerceptionCommandCode::kDetection, -101,
+                                "RequestDetection missing Image field");
     }
     WLOG_DEBUG("Image data found in input_data");
     // 构造图像请求
+    
     humanoid_robot::PB::common::Image image_request;
+    image_request.CopyFrom(image_from_request); // 拷贝原始 Image 中的所有有效数据
 
-    // 如果是Image类型的Variant
-    if (image_it->second.value_case() ==
-        humanoid_robot::PB::common::Variant::KImageValue) {
-      image_request = image_it->second.imagevalue();
-    } else {
-      // 假设是字符串格式的图像数据
-      image_request.set_img(image_it->second.bytevalue());
-      WLOG_DEBUG("Image data set in image_request， image size : %d bytes",
-                 image_request.img().size());
-      image_request.set_requiresmasks(false); // 检测不需要masks
+    image_request.set_requiresmasks(false);
 
-      // 设置时间戳
-      auto now = std::chrono::system_clock::now();
-      auto timestamp = std::chrono::duration_cast<std::chrono::microseconds>(
-                           now.time_since_epoch())
-                           .count();
-      image_request.set_timestamp(std::to_string(timestamp));
-    }
-
+    auto now = std::chrono::system_clock::now();
+    auto timestamp = std::chrono::duration_cast<std::chrono::microseconds>(
+                          now.time_since_epoch())
+                          .count();
+    image_request.set_timestamp(std::to_string(timestamp));
+    
     // 创建客户端上下文并设置超时
     grpc::ClientContext context;
     auto deadline = std::chrono::system_clock::now() + std::chrono::seconds(10);
     context.set_deadline(deadline);
 
     // 调用GetDetectionResult
-    humanoid_robot::PB::perception::Detection response;
+    ReDetection response;
     grpc::Status status =
         pImpl_->stub_->GetDetectionResult(&context, image_request, &response);
 
     if (!status.ok()) {
       return ModuleResult::Error(
-          "Perception", humanoid_robot::PB::perception::GET_DETECTION_RESULT,
+          "Perception", PerceptionCommandCode::kDetection,
           status.error_code(),
           "Detection service error: " + status.error_message());
     }
     WLOG_DEBUG("[Perception] Detection request processed successfully");
     // 构造返回结果
-    auto result_data =
-        std::make_unique<humanoid_robot::PB::common::Dictionary>();
-    auto result_kv_map = result_data->mutable_keyvaluelist();
-    auto response_timestamp = response.timestamp();
-    auto response_rows_size = response.rows_size();
-    auto response_rows = response.rows();
-    WLOG_DEBUG("[Perception] Response timestamp: %s",
-               response_timestamp.c_str());
-    WLOG_DEBUG("[Perception] Response rows size: %d", response_rows_size);
-    // 添加检测结果数量
-    {
-      humanoid_robot::PB::common::Variant var;
-      var.set_int32value(response.rows_size());
-      result_kv_map->insert({"rows_size", var});
+    
+    ResponseDetection pb_response;
+    pb_response.set_ret(0);
+    pb_response.mutable_detection()->CopyFrom(response);
+
+    auto result_data = std::make_unique<PB_common::Dictionary>();
+    auto result_kv = result_data->mutable_keyvaluelist();
+    PB_common::Variant pb_response_str;
+
+    std::string pb_response_serialized_str;
+    auto pb_serialize_result = pb_response.SerializeToString(&pb_response_serialized_str);
+    if (!pb_serialize_result) {
+        WLOG_ERROR("[Perception] Failed to serialize response_detection");
+        return ModuleResult::Error("Perception",
+                                PerceptionCommandCode::kDetection, -100,
+                                "Failed to serialize response_detection");
     }
 
-    // 添加检测结果
-    for (int i = 0; i < response.rows_size(); ++i) {
-      const auto &detection = response.rows(i);
-      std::string prefix = "detection_" + std::to_string(i) + "_";
-
-      // 检测框
-      {
-        humanoid_robot::PB::common::Variant var;
-        // var.set_type(humanoid_robot::PB::common::Variant::KBBoxValue);
-        *var.mutable_bboxvalue() = detection.bbox();
-        result_kv_map->insert({prefix + "bbox", var});
-      }
-
-      // 跟踪ID
-      {
-        humanoid_robot::PB::common::Variant var;
-        var.set_stringvalue(detection.trackid());
-        result_kv_map->insert({prefix + "track_id", var});
-      }
-
-      // 置信度
-      {
-        humanoid_robot::PB::common::Variant var;
-        var.set_doublevalue(detection.conf());
-        result_kv_map->insert({prefix + "confidence", var});
-      }
-
-      // 类别
-      {
-        humanoid_robot::PB::common::Variant var;
-        var.set_stringvalue(detection.cls());
-        result_kv_map->insert({prefix + "class", var});
-      }
-
-      // 运动状态
-      {
-        humanoid_robot::PB::common::Variant var;
-        var.set_boolvalue(detection.ismove());
-        result_kv_map->insert({prefix + "is_moving", var});
-      }
-    }
-
+    pb_response_str.set_bytevalue(pb_response_serialized_str);
+    result_kv->insert({"data", pb_response_str});
+    
     WLOG_DEBUG("[Perception] Successfully processed detection request, got %d "
                "detections",
                response.rows_size());
 
     return ModuleResult::Success(
-        "Perception", humanoid_robot::PB::perception::GET_DETECTION_RESULT,
+        "Perception", PerceptionCommandCode::kDetection,
         std::move(result_data));
   } catch (const std::exception &e) {
     return ModuleResult::Error(
-        "Perception", humanoid_robot::PB::perception::GET_DETECTION_RESULT, -4,
+        "Perception", PerceptionCommandCode::kDetection, -4,
         "Exception in detection processing: " + std::string(e.what()));
   }
 }
 
-ModuleResult PerceptionModule::divide(
+ModuleResult PerceptionModule::Division(
     // grpc::ServerContext *&context,
     const humanoid_robot::PB::common::Dictionary &input_data,
     const humanoid_robot::PB::common::Dictionary &params) {
   WLOG_DEBUG("Processing division command");
   if (!pImpl_->connected_ || !pImpl_->stub_) {
     return ModuleResult::Error(
-        "Perception", humanoid_robot::PB::perception::GET_DIVISION_RESULT, -1,
+        "Perception", PerceptionCommandCode::kDivision, -1,
         "Perception service not connected");
   }
 
   try {
     // 从input_data中提取图像数据
-    auto &kv_map = input_data.keyvaluelist();
-    auto image_it = kv_map.find("image");
-    if (image_it == kv_map.end()) {
-      WLOG_ERROR("No image data provided in input_data for division");
-      return ModuleResult::Error(
-          "Perception", humanoid_robot::PB::perception::GET_DIVISION_RESULT, -2,
-          "No image data provided");
+    auto data_it = input_data.keyvaluelist().find("request_division");
+    if (data_it == input_data.keyvaluelist().end()) {
+        WLOG_ERROR("[Perception] Failed to find data in input_data");
+        return ModuleResult::Error("Perception",
+                                PerceptionCommandCode::kDivision, -100,
+                                "Failed to find data in input_data");
+    }
+    const PB_common::Variant &data_var = data_it->second;
+    humanoid_robot::PB::sdk_service::perception::RequestDivision request_division;
+    auto protobuf_convert_status = request_division.ParseFromString(data_var.bytevalue());
+    if (!protobuf_convert_status) {
+        WLOG_ERROR("[Perception] Failed to parse data to RequestDivision");
+        return ModuleResult::Error("Perception",
+                                PerceptionCommandCode::kDivision, -100,
+                                "Failed to parse data to RequestDivision");
+    }
+    // auto image_it = data_it.image();
+   const humanoid_robot::PB::common::Image &image_from_request = request_division.image();
+    
+    if (!request_division.has_image()) {
+        WLOG_ERROR("[Perception] RequestDivision has no valid Image field");
+        return ModuleResult::Error("Perception",
+                                PerceptionCommandCode::kDivision, -101,
+                                "RequestDivision missing Image field");
     }
 
     WLOG_DEBUG("Image data found in input_data for division");
     // 构造图像请求
     humanoid_robot::PB::common::Image image_request;
+    image_request.CopyFrom(image_from_request); // 拷贝原始 Image 中的所有有效数据
 
-    // 如果是Image类型的Variant
-    if (image_it->second.value_case() ==
-        humanoid_robot::PB::common::Variant::KImageValue) {
-      image_request = image_it->second.imagevalue();
-    } else {
-      // 假设是字符串格式的图像数据
-      image_request.set_img(image_it->second.bytevalue());
-      image_request.set_requiresmasks(true); // 分割需要masks
+    image_request.set_requiresmasks(true);
 
-      // 设置时间戳
-      auto now = std::chrono::system_clock::now();
-      auto timestamp = std::chrono::duration_cast<std::chrono::microseconds>(
-                           now.time_since_epoch())
-                           .count();
-      image_request.set_timestamp(std::to_string(timestamp));
-    }
-
+    auto now = std::chrono::system_clock::now();
+    auto timestamp = std::chrono::duration_cast<std::chrono::microseconds>(
+                          now.time_since_epoch())
+                          .count();
+    image_request.set_timestamp(std::to_string(timestamp));
     // 创建客户端上下文并设置超时
     grpc::ClientContext context;
     auto deadline = std::chrono::system_clock::now() + std::chrono::seconds(10);
     context.set_deadline(deadline);
 
     // 调用GetDivisionResult
-    humanoid_robot::PB::perception::Division response;
+    ReDivision response;
     grpc::Status status =
         pImpl_->stub_->GetDivisionResult(&context, image_request, &response);
 
     if (!status.ok()) {
       return ModuleResult::Error(
-          "Perception", humanoid_robot::PB::perception::GET_DIVISION_RESULT,
+          "Perception", PerceptionCommandCode::kDivision,
           status.error_code(),
           "Division service error: " + status.error_message());
     }
 
     // 构造返回结果
-    auto result_data =
-        std::make_unique<humanoid_robot::PB::common::Dictionary>();
-    auto result_kv_map = result_data->mutable_keyvaluelist();
+    auto result_data = std::make_unique<PB_common::Dictionary>();
+    auto result_kv = result_data->mutable_keyvaluelist();
+    PB_common::Variant pb_response_str;
+    ResponseDivision pb_response;
+    pb_response.set_ret(0);
+    pb_response.mutable_division()->CopyFrom(response);
 
-    // 添加分割结果数量
-    {
-      humanoid_robot::PB::common::Variant var;
-      var.set_int32value(response.rows_size());
-      result_kv_map->insert({"division_count", var});
+    std::string pb_response_serialized_str;
+    auto pb_serialize_result = pb_response.SerializeToString(&pb_response_serialized_str);
+    if (!pb_serialize_result) {
+        WLOG_ERROR("[Perception] Failed to serialize response_division");
+        return ModuleResult::Error("Perception",
+                                PerceptionCommandCode::kDivision, -100,
+                                "Failed to serialize response_division");
     }
 
-    // 添加分割结果
-    for (int i = 0; i < response.rows_size(); ++i) {
-      const auto &division = response.rows(i);
-      std::string prefix = "division_" + std::to_string(i) + "_";
-
-      // 跟踪ID
-      {
-        humanoid_robot::PB::common::Variant var;
-        var.set_stringvalue(division.trackid());
-        result_kv_map->insert({prefix + "track_id", var});
-      }
-
-      // 置信度
-      {
-        humanoid_robot::PB::common::Variant var;
-        var.set_doublevalue(division.conf());
-        result_kv_map->insert({prefix + "confidence", var});
-      }
-
-      // 类别
-      {
-        humanoid_robot::PB::common::Variant var;
-        var.set_stringvalue(division.cls());
-        result_kv_map->insert({prefix + "class", var});
-      }
-
-      // 运动状态
-      {
-        humanoid_robot::PB::common::Variant var;
-        var.set_boolvalue(division.ismove());
-        result_kv_map->insert({prefix + "is_moving", var});
-      }
-
-      // 分割掩码数量
-      {
-        humanoid_robot::PB::common::Variant var;
-        var.set_int32value(division.masks_size());
-        result_kv_map->insert({prefix + "mask_count", var});
-      }
-
-      // 分割掩码点
-      for (int j = 0; j < division.masks_size(); ++j) {
-        const auto &mask = division.masks(j);
-        std::string mask_prefix = prefix + "mask_" + std::to_string(j) + "_";
-
-        {
-          humanoid_robot::PB::common::Variant var;
-          var.set_int32value(mask.x());
-          result_kv_map->insert({mask_prefix + "x", var});
-        }
-
-        {
-          humanoid_robot::PB::common::Variant var;
-          var.set_int32value(mask.y());
-          result_kv_map->insert({mask_prefix + "y", var});
-        }
-      }
-    }
-
+    pb_response_str.set_bytevalue(pb_response_serialized_str);
+    result_kv->insert({"data", pb_response_str});
     WLOG_DEBUG("[Perception] Successfully processed division request, got %d "
                "divisions",
                response.rows_size());
 
     return ModuleResult::Success(
-        "Perception", humanoid_robot::PB::perception::GET_DIVISION_RESULT,
+        "Perception", PerceptionCommandCode::kDivision,
         std::move(result_data));
   } catch (const std::exception &e) {
     return ModuleResult::Error(
-        "Perception", humanoid_robot::PB::perception::GET_DIVISION_RESULT, -4,
+        "Perception", PerceptionCommandCode::kDivision, -4,
         "Exception in division processing: " + std::string(e.what()));
   }
 }
