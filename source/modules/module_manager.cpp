@@ -80,8 +80,7 @@ ModuleManager::ModuleManager()
   for (auto command : control_commands) {
     command_to_module_[command] = control_module;
   }
-  // ********** 启动定时检查线程 **********
-  check_thread_ = std::thread(&ModuleManager::ModulesRunningCheck, this);
+ 
   std::cout << "[ModuleManager] All modules initialized" << std::endl;
   WLOG_DEBUG("[ModuleManager] All modules initialized");
 }
@@ -112,13 +111,16 @@ void ModuleManager::ModulesRunningCheck() {
           if (!module->IsRunning()) {
             WLOG_WARN("[ModuleManager] %s is not running, restarting... ",
                       module_name.c_str());
+            std::cout << "[ModuleManager] Restarting module " << module_name.c_str() << std::endl;
             bool restart_ok = module->Restart(); // 调用Restart
             if (restart_ok) {
-              WLOG_INFO("[ModuleManager] %s restarted successfully",
-                        module_name.c_str());
+              std::string restart_info = "[ModuleManager] " + module_name + " restarted successfully";
+              std::cout << restart_info << std::endl;
+              WLOG_INFO(restart_info.c_str());
             } else {
-              WLOG_ERROR("[ModuleManager] Failed to restart %s",
-                         module_name.c_str());
+              std::string restart_error = "[ModuleManager] Failed to restart " + module_name;
+              std::cout << restart_error << std::endl;
+              WLOG_ERROR(restart_error.c_str());
             }
           }
         }
@@ -155,6 +157,9 @@ bool ModuleManager::StartAllModules() {
   } else {
     WLOG_ERROR("[ModuleManager] Some modules failed to start.");
   }
+
+   // ********** 启动定时检查线程 **********
+  check_thread_ = std::thread(&ModuleManager::ModulesRunningCheck, this);
 
   return all_started;
 }

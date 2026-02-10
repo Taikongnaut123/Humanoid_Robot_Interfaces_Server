@@ -20,7 +20,7 @@ public:
 
 protected:
     bool Initialize() override;
-    bool IsRunning() override;
+    // bool IsRunning() override;
     void Cleanup() override;
 
     ModuleResult ProcessCommand(

@@ -22,6 +22,7 @@ ModuleBase::ModuleBase(const std::string &module_name, size_t worker_threads)
 ModuleBase::~ModuleBase() { Stop(); }
 
 bool ModuleBase::Start() {
+  std::lock_guard<std::mutex> lock(state_mutex_);
   if (running_.load()) {
     return true; // 已经运行中
   }
@@ -48,38 +49,60 @@ bool ModuleBase::Start() {
 }
 
 void ModuleBase::Stop() {
-  if (!running_.load()) {
-    return; // 已经停止
+  bool was_running = false;
+  std::vector<std::thread> threads_to_join;
+  
+  // 第一步：获取必要的信息并设置停止标志，然后释放锁
+  {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    if (!running_.load()) {
+      return; // 已经停止
+    }
+    
+    was_running = true;
+    running_.store(false);
+    
+    // 唤醒所有工作线程
+    queue_condition_.notify_all();
+    
+    // 移动工作线程到局部变量，以便在锁外等待
+    threads_to_join.swap(worker_threads_);
   }
-
+  
+  if (!was_running) {
+    return;
+  }
+  
   WLOG_DEBUG("[%s] Stopping module...", module_name_.c_str());
-
-  running_.store(false);
-
-  // 唤醒所有工作线程
-  queue_condition_.notify_all();
-
-  // 等待所有工作线程结束
-  for (auto &thread : worker_threads_) {
+  
+  // 第二步：在锁外等待所有工作线程结束
+  for (auto &thread : threads_to_join) {
     if (thread.joinable()) {
       thread.join();
     }
   }
-  worker_threads_.clear();
-
-  // 清理剩余任务
-  std::lock_guard<std::mutex> lock(queue_mutex_);
-  while (!task_queue_.empty()) {
-    auto task = std::move(task_queue_.front());
-    task_queue_.pop();
-
-    // 设置任务被取消的结果
+  
+  // 第三步：清理剩余任务
+  std::vector<std::unique_ptr<ModuleTask>> tasks_to_clean;
+  {
+    std::lock_guard<std::mutex> lock_queue(queue_mutex_);
+    while (!task_queue_.empty()) {
+      tasks_to_clean.push_back(std::move(task_queue_.front()));
+      task_queue_.pop();
+    }
+  }
+  
+  // 第四步：在锁外处理任务结果
+  for (auto &task : tasks_to_clean) {
     task->result_promise.set_value(ModuleResult::Error(
         module_name_, task->command_id, -1, "Module stopped"));
   }
-
-  // 调用子类清理
-  Cleanup();
+  
+  // 第五步：调用子类清理
+  {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    Cleanup();
+  }
 
   WLOG_DEBUG("[%s] Module stopped", module_name_.c_str());
 }
@@ -87,9 +110,14 @@ void ModuleBase::Stop() {
 // 重启模块
 bool ModuleBase::Restart() {
   WLOG_DEBUG("[%s] Restarting module...", module_name_.c_str());
+  
+  // 先等待模块停止 - Stop()已经是线程安全的，不会长时间持有锁
   Stop();
-  // sleep 2000ms
-  std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+  
+  // 短暂休眠，确保模块完全停止
+  std::this_thread::sleep_for(std::chrono::milliseconds(500));
+  
+  // 启动模块 - Start()已经是线程安全的
   return Start();
 }
 

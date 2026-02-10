@@ -9,7 +9,6 @@ message(STATUS "rclcpp_INCLUDE_DIRS: ${rclcpp_INCLUDE_DIRS}")
 # 设置 C++ 标准
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
 # 设置项目变量
 set(INTERFACES_SERVER_ROOT_PATH ${CMAKE_CURRENT_SOURCE_DIR})
 set(INTERFACES_SERVER_INCLUDE_DIR "${INTERFACES_SERVER_ROOT_PATH}/include")
@@ -20,5 +19,5 @@ include_directories(${INTERFACES_SERVER_INCLUDE_DIR})
 
 
 # 添加子目录
-# add_subdirectory(source)
+add_subdirectory(source)
 add_subdirectory(service)

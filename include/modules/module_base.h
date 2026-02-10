@@ -21,6 +21,9 @@
 
 #include "interfaces/interfaces_request_response.pb.h"
 
+// #include "ConfigManager/config_manager.h"
+#include "ConfigManager/simple_config_manager.h"
+
 namespace humanoid_robot {
 namespace server {
 namespace modules {
@@ -145,6 +148,9 @@ public:
   GetStatus() const;
 
 protected:
+
+  // 配置管理器
+  std::unique_ptr<humanoid_robot::framework::common::ConfigManager> config_manager_;
   /**
    * 子类需要实现的命令处理函数
    * @param command_id 命令ID
@@ -170,6 +176,10 @@ protected:
 private:
   std::string module_name_;
   std::atomic<bool> running_;
+
+  std::mutex state_mutex_; // 保护运行状态的互斥锁
+
+  
   size_t worker_thread_count_;
 
   // 任务队列

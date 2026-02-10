@@ -11,11 +11,11 @@
 #include "motor_interface/msg/motor_drive.hpp"
 #include "motor_interface/msg/motor_feedback.hpp"
 #include "sdk_service/common/service.pb.h"
-#include "sdk_service/control/responce_emergency_stop.pb.h"
-#include "sdk_service/control/responce_get_joint_info.pb.h"
+#include "sdk_service/control/response_emergency_stop.pb.h"
+#include "sdk_service/control/response_get_joint_info.pb.h"
 #include "sdk_service/control/request_joint_motion.pb.h"
-#include "sdk_service/control/responce_joint_motion.pb.h"
-#include "sdk_service/control/responce_status.pb.h"
+#include "sdk_service/control/response_joint_motion.pb.h"
+#include "sdk_service/control/response_status.pb.h"
 
 #include "communication_v2/net/CNode.hpp"
 #include "Log/wlog.hpp"
@@ -28,10 +28,10 @@ namespace humanoid_robot {
 namespace server {
 namespace modules {
 
-using ResponceEmergencyStop = humanoid_robot::PB::sdk_service::control::ResponceEmergencyStop;
-using ResponceGetJointInfo = humanoid_robot::PB::sdk_service::control::ResponceGetJointInfo;
-using ResponceJointMotion = humanoid_robot::PB::sdk_service::control::ResponceJointMotion;
-using ControlResStatus = humanoid_robot::PB::sdk_service::control::ResponceStatus;
+using ResponseEmergencyStop = humanoid_robot::PB::sdk_service::control::ResponseEmergencyStop;
+using ResponseGetJointInfo = humanoid_robot::PB::sdk_service::control::ResponseGetJointInfo;
+using ResponseJointMotion = humanoid_robot::PB::sdk_service::control::ResponseJointMotion;
+using ControlResStatus = humanoid_robot::PB::sdk_service::control::ResponseStatus;
 using ControlCommandCode = humanoid_robot::PB::sdk_service::common::ControlCommandCode;
 
 // ==================== 通信接口抽象类 ====================
@@ -446,31 +446,31 @@ bool ControlModule::Initialize() {
     }
 }
 
-bool ControlModule::IsRunning() {
-    if (!pImpl_) {
-        WLOG_ERROR("[Control] IsRunning: pImpl_ is null, module is not running");
-        return false;
-    }
+// bool ControlModule::IsRunning() {
+//     if (!pImpl_) {
+//         WLOG_ERROR("[Control] IsRunning: pImpl_ is null, module is not running");
+//         return false;
+//     }
 
-    if (!pImpl_->comm_) {
-        WLOG_WARN("[Control] IsRunning: Communication interface is null, module is not running");
-        return false;
-    }
+//     if (!pImpl_->comm_) {
+//         WLOG_WARN("[Control] IsRunning: Communication interface is null, module is not running");
+//         return false;
+//     }
 
-    // std::lock_guard<std::mutex> lock(pImpl_->feedback_mutex_);
-    // if (!pImpl_->initialized_) {
-    //     WLOG_WARN("[Control] IsRunning: Module not initialized yet");
-    //     return false;
-    // }
+//     // std::lock_guard<std::mutex> lock(pImpl_->feedback_mutex_);
+//     // if (!pImpl_->initialized_) {
+//     //     WLOG_WARN("[Control] IsRunning: Module not initialized yet");
+//     //     return false;
+//     // }
 
-    bool comm_is_running = false;
-#ifdef USE_ROS2_COMMUNICATION
-    comm_is_running = true;
-#else
-    comm_is_running = true;
-#endif
-    return comm_is_running;
-}
+//     bool comm_is_running = false;
+// #ifdef USE_ROS2_COMMUNICATION
+//     comm_is_running = true;
+// #else
+//     comm_is_running = true;
+// #endif
+//     return comm_is_running;
+// }
 
 void ControlModule::Cleanup() {
     WLOG_INFO("[Control] Cleaning up control module");
@@ -517,29 +517,29 @@ ModuleResult ControlModule::EmergencyStop(
         // 构造返回结果
         auto result_data = std::make_unique<PB_common::Dictionary>();
         auto result_kv = result_data->mutable_keyvaluelist();
-        PB_common::Variant pb_responce_str;
+        PB_common::Variant pb_response_str;
         
-        ResponceEmergencyStop responce_emergency_stop;
-        responce_emergency_stop.set_stop_feedback("急停执行成功");
+        ResponseEmergencyStop response_emergency_stop;
+        response_emergency_stop.set_stop_feedback("急停执行成功");
         
         auto now = std::chrono::system_clock::now();
         auto now_s = std::chrono::duration_cast<std::chrono::duration<double>>(
             now.time_since_epoch()
         );
         // 调用 set_stop_timestamp() 传入时间戳值
-        responce_emergency_stop.set_stop_timestamp(now_s.count());
+        response_emergency_stop.set_stop_timestamp(now_s.count());
 
-        std::string pb_responce_serialized_str;
-        auto pb_serialize_result = responce_emergency_stop.SerializeToString(&pb_responce_serialized_str);
+        std::string pb_response_serialized_str;
+        auto pb_serialize_result = response_emergency_stop.SerializeToString(&pb_response_serialized_str);
         if (!pb_serialize_result) {
-            WLOG_ERROR("[Control] Failed to serialize responce_emergency_stop");
+            WLOG_ERROR("[Control] Failed to serialize response_emergency_stop");
             return ModuleResult::Error("Control",
                                     ControlCommandCode::kEmergencyStop, -100,
-                                    "Failed to serialize responce_emergency_stop");
+                                    "Failed to serialize response_emergency_stop");
         }
 
-        pb_responce_str.set_bytevalue(pb_responce_serialized_str);
-        result_kv->insert({"data", pb_responce_str});
+        pb_response_str.set_bytevalue(pb_response_serialized_str);
+        result_kv->insert({"data", pb_response_str});
         
         WLOG_DEBUG("[Control] Emergency stop completed successfully");
         return ModuleResult::Success("Control", ControlCommandCode::kEmergencyStop, 
@@ -581,9 +581,9 @@ ModuleResult ControlModule::GetJointInfo(
         // 构造返回结果
         auto result_data = std::make_unique<PB_common::Dictionary>();
         auto result_kv = result_data->mutable_keyvaluelist();
-        PB_common::Variant pb_responce_str;
+        PB_common::Variant pb_response_str;
         
-        ResponceGetJointInfo responce_get_joint_info;
+        ResponseGetJointInfo response_get_joint_info;
         
         auto get_joint_supported_modes = [](const std::string& joint_name) -> std::vector<int32_t> {
             return {MotionMode::ABSOLUTE_POSITION, MotionMode::RELATIVE_POSITION, MotionMode::VELOCITY};
@@ -594,7 +594,7 @@ ModuleResult ControlModule::GetJointInfo(
         };
         
         for (const auto& joint_name : joint_names) {
-            humanoid_robot::PB::sdk_service::control::JointDetail* joint_detail = responce_get_joint_info.add_joint_details();
+            humanoid_robot::PB::sdk_service::control::JointDetail* joint_detail = response_get_joint_info.add_joint_details();
             
             joint_detail->set_joint_name(joint_name);
             
@@ -608,18 +608,18 @@ ModuleResult ControlModule::GetJointInfo(
             joint_detail->set_max_limit(max_limit);
         }
         
-        std::string pb_responce_serialized_str;
-        auto pb_serialize_result = responce_get_joint_info.SerializeToString(&pb_responce_serialized_str);
+        std::string pb_response_serialized_str;
+        auto pb_serialize_result = response_get_joint_info.SerializeToString(&pb_response_serialized_str);
         if (!pb_serialize_result) {
-            WLOG_ERROR("[Control] Failed to serialize responce_get_joint_info");
+            WLOG_ERROR("[Control] Failed to serialize response_get_joint_info");
             return ModuleResult::Error("Control",
                                     ControlCommandCode::kGetJointInfo, -100,
-                                    "Failed to serialize responce_get_joint_info");
+                                    "Failed to serialize response_get_joint_info");
         }
         
         // 将序列化后的 Protobuf 数据存入 Variant 的 bytevalue
-        pb_responce_str.set_bytevalue(pb_responce_serialized_str);
-        result_kv->insert({"data", pb_responce_str});
+        pb_response_str.set_bytevalue(pb_response_serialized_str);
+        result_kv->insert({"data", pb_response_str});
 
         WLOG_DEBUG("[Control] Get joint info completed, found %zu joints", joint_names.size());
         return ModuleResult::Success("Control", ControlCommandCode::kGetJointInfo, 
@@ -720,24 +720,24 @@ ModuleResult ControlModule::JointMotion(
         // 构造返回结果
         auto result_data = std::make_unique<PB_common::Dictionary>();
         auto result_kv = result_data->mutable_keyvaluelist();
-        PB_common::Variant pb_responce_str;
+        PB_common::Variant pb_response_str;
         
-        ResponceJointMotion responce_joint_motion;
+        ResponseJointMotion response_joint_motion;
         std::string execute_info = "All " + std::to_string(joints.size()) + " joints executed successfully";
-        responce_joint_motion.set_execute_info(execute_info);
+        response_joint_motion.set_execute_info(execute_info);
 
-        std::string pb_responce_serialized_str;
-        auto pb_serialize_result = responce_joint_motion.SerializeToString(&pb_responce_serialized_str);
+        std::string pb_response_serialized_str;
+        auto pb_serialize_result = response_joint_motion.SerializeToString(&pb_response_serialized_str);
         if (!pb_serialize_result) {
-            WLOG_ERROR("[Control] Failed to serialize responce_joint_motion");
+            WLOG_ERROR("[Control] Failed to serialize response_joint_motion");
             return ModuleResult::Error("Control",
                                     ControlCommandCode::kJointMotion, -101,
-                                    "Failed to serialize responce_joint_motion");
+                                    "Failed to serialize response_joint_motion");
         }
         
         
-        pb_responce_str.set_bytevalue(pb_responce_serialized_str);
-        result_kv->insert({"data", pb_responce_str});
+        pb_response_str.set_bytevalue(pb_response_serialized_str);
+        result_kv->insert({"data", pb_response_str});
         
         WLOG_DEBUG("[Control] Joint motion completed for %zu joints", joints.size());
         return ModuleResult::Success("Control", ControlCommandCode::kJointMotion, 

@@ -1,0 +1,15 @@
+navigation:
+  service_client:
+    service_name: "navigation_service"
+    
+    client_options:
+      default_timeout: 5000 # ms
+      max_retry_count: 3
+      enable_dds_discovery: false 
+      prefer_uds: true
+      service_address: "localhost:50052"
+      enable_async_callback: false
+      grpc_address: ""
+      uds_path: ""
+
+

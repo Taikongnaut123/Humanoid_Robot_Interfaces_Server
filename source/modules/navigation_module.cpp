@@ -91,7 +91,6 @@ using ResponseStopChargingPb =
 
 namespace {
 // 通用常量定义 - 消除硬编码/魔法值
-constexpr char* const kNavigationServiceTarget = "navigation_service";
 constexpr char* const kRequestDataKey = "request_data";
 constexpr char* const kResponseDataKey = "data";
 constexpr char* const kStatusFieldName = "status";
@@ -311,7 +310,8 @@ ModuleResult SendNavigationRequest(
   int32_t navi_svr_status = response->status();
   if (navi_svr_status != 0) {
     char err_msg[256] = {0};
-    snprintf(err_msg, sizeof(err_msg), kErrMsgServiceError, navi_svr_status,response->payload().c_str());
+    snprintf(err_msg, sizeof(err_msg), kErrMsgServiceError, navi_svr_status,
+             response->payload().c_str());
 
     WLOG_ERROR("[Navigation] %s", err_msg);
     return ModuleResult::Error("Navigation", command_code, navi_svr_status,
@@ -321,10 +321,12 @@ ModuleResult SendNavigationRequest(
   // 6. 反序列化响应为ROS消息（有/无参数逻辑一致）
   ResponseRosType ros_response;
   auto& response_serializer = GetSerializer<ResponseRosType>();
-  bool deserialize_ret = response_serializer.DeserializeFromString(response->payload(), ros_response);
+  bool deserialize_ret = response_serializer.DeserializeFromString(
+      response->payload(), ros_response);
   if (!deserialize_ret) {
     char err_msg[256] = {0};
-    snprintf(err_msg, sizeof(err_msg), kErrMsgDeserializeRos, response->payloadsize());
+    snprintf(err_msg, sizeof(err_msg), kErrMsgDeserializeRos,
+             response->payloadsize());
     WLOG_ERROR("[Navigation] %s", err_msg);
     return ModuleResult::Error("Navigation", command_code, kDefaultErrorCode,
                                err_msg);
@@ -506,15 +508,86 @@ NavigationModule::NavigationModule()
 
 NavigationModule::~NavigationModule() = default;
 
+bool InitClientOptions(
+    humanoid_robot::framework::net::CClientOptions& client_options,
+    const humanoid_robot::framework::common::ConfigNode& config) {
+  // default_timeout: 5000 # ms
+  // max_retry_count: 3
+  // enable_dds_discovery: true
+  // prefer_uds: true
+  // service_address: ""
+  // enable_async_callback: false
+  // grpc_address: ""
+  // uds_path: ""
+
+  auto client_option_config =
+      config["navigation"]["service_client"]["client_options"];
+
+  int default_timeout = std::stoi(client_option_config["default_timeout"]);
+  client_options.default_timeout = std::chrono::milliseconds(default_timeout);
+  int max_retry_count = std::stoi(client_option_config["max_retry_count"]);
+  client_options.max_retry_count = max_retry_count;
+  bool enable_dds_discovery =
+      std::string(client_option_config["enable_dds_discovery"]) == "true";
+  client_options.enable_dds_discovery = enable_dds_discovery;
+  bool prefer_uds = std::string(client_option_config["prefer_uds"]) == "true";
+  client_options.prefer_uds = prefer_uds;
+
+  std::string service_address = client_option_config["service_address"];
+  client_options.service_address = service_address;
+  bool enable_async_callback =
+      std::string(client_option_config["enable_async_callback"]) == "true";
+  client_options.enable_async_callback = enable_async_callback;
+  std::string grpc_address = client_option_config["grpc_address"];
+  client_options.grpc_address = grpc_address;
+  std::string uds_path = client_option_config["uds_path"];
+  client_options.uds_path = uds_path;
+
+  // 打印配置：
+  WLOG_INFO(
+      "[Navigation] Client Options: default_timeout=%d, max_retry_count=%d, "
+      "enable_dds_discovery=%d, prefer_uds=%d, service_address=%s, "
+      "enable_async_callback=%d, grpc_address=%s, uds_path=%s",
+      default_timeout, max_retry_count, enable_dds_discovery, prefer_uds,
+      service_address.c_str(), enable_async_callback, grpc_address.c_str(),
+      uds_path.c_str());
+  std::cout << "[Navigation] Client Options: default_timeout=" << default_timeout
+            << ", max_retry_count=" << max_retry_count
+            << ", enable_dds_discovery=" << enable_dds_discovery
+            << ", prefer_uds=" << prefer_uds
+            << ", service_address=" << service_address
+            << ", enable_async_callback=" << enable_async_callback
+            << ", grpc_address=" << grpc_address << ", uds_path=" << uds_path
+            << std::endl;
+
+  // TOOD: 验证client_options是否合法
+
+  return true;
+}
+
 bool NavigationModule::Initialize() {
   try {
-    pImpl_->server_target_ = kNavigationServiceTarget;
+    auto config = config_manager_->LoadFromFile("config/module_config.yaml");
+
+    if (config.IsEmpty()) {
+      WLOG_ERROR("[Navigation] Failed to load config file");
+      return false;
+    }
+
+    std::string service_name =
+        config["navigation"]["service_client"]["service_name"];
+    if (service_name.empty()) {
+      WLOG_ERROR("[Navigation] Service name is empty");
+      return false;
+    }
+
+    pImpl_->server_target_ = service_name;
     // 创建 Service Client（会自动从 DDS 发现 Server）
     humanoid_robot::framework::net::CClientOptions client_options;
-    client_options.enable_dds_discovery =
-        true;                          // 从 DDS 自动发现 Service Server
-    client_options.prefer_uds = true;  // 同机通信优先使用 UDS
-    client_options.default_timeout = kServiceWaitTimeout;
+    if (!InitClientOptions(client_options, config)) {
+      WLOG_ERROR("[Navigation] Failed to init client options");
+      return false;
+    }
 
     pImpl_->service_client_ =
         pImpl_->node_.CreateServiceClient<UniversalRequest, UniversalResponse>(
@@ -540,17 +613,39 @@ bool NavigationModule::Initialize() {
   }
 }
 
-bool NavigationModule::IsRunning() {
-  if (!pImpl_->service_client_) return false;
-  pImpl_->connected_ = pImpl_->service_client_->WaitForService(kRunningCheckTimeout);
-  return pImpl_->connected_;
-}
+// bool NavigationModule::IsRunning() {
+//   bool has_client = false;
+//   std::shared_ptr<CServiceClient> service_client;
+  
+//   // 先获取必要的信息，尽快释放锁
+//   {
+//     std::lock_guard<std::mutex> lock(state_mutex_);
+//     has_client = (pImpl_->service_client_ != nullptr);
+//     if (has_client) {
+//       service_client = pImpl_->service_client_;
+//     }
+//   }
+  
+//   if (!has_client) return false;
+  
+//   // 检查服务是否可用，但不持有锁，避免死锁
+//   bool is_available = service_client->IsAvailable();
+  
+//   // 更新连接状态
+//   {
+//     std::lock_guard<std::mutex> lock(state_mutex_);
+//     pImpl_->connected_ = is_available;
+//   }
+
+//   return is_available;
+// }
 
 void NavigationModule::Cleanup() {
   WLOG_INFO("Cleaning up navigation resources...");
   if (pImpl_->connected_) {
     pImpl_->connected_ = false;
     pImpl_->service_client_.reset();  // 显式释放客户端，避免内存泄漏
+    pImpl_->service_client_ = nullptr;  // 显式释放客户端，避免内存泄漏
   }
   WLOG_INFO("[Navigation] Navigation module cleanup completed");
 }

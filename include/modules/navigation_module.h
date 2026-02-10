@@ -24,7 +24,7 @@ class NavigationModule : public ModuleBase {
  public:
   NavigationModule();
   virtual ~NavigationModule();
-  bool IsRunning() override;
+  // bool IsRunning() override;
 
  protected:
   bool Initialize() override;
