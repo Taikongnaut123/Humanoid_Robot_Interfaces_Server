@@ -139,11 +139,9 @@ software:
           enable_uds: true
           heartbeat_interval_ms: 1000
         publisher:
-          cmd_vel:
-            grpc_address: "0.0.0.0:0"
-            enable_dds_discovery: true
-            enable_dual_server: true
-          motor_drive:
+          cmd_vel: "/cmd_vel"
+          motor_drive: "motor_drive"
+          pub_options:
             grpc_address: "0.0.0.0:0"
             enable_dds_discovery: true
             enable_dual_server: true

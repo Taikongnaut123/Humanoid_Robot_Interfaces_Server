@@ -77,6 +77,8 @@ private:
     rclcpp::Subscription<motor_interface::msg::MotorFeedback>::SharedPtr motor_feedback_sub_;
     MotorFeedbackCallback feedback_callback_;
     bool ros_initialized_;
+    std::unique_ptr<humanoid_robot::framework::common::ConfigManager> config_manager_;
+    humanoid_robot::framework::common::ConfigNode loaded_config_;
 };
 
 // ==================== 自定义通信库实现类 ====================
@@ -102,6 +104,8 @@ private:
     std::shared_ptr<humanoid_robot::framework::net::CSubscriber<motor_interface::msg::MotorFeedback>> motor_feedback_sub_;
     MotorFeedbackCallback feedback_callback_;
     bool initialized_;
+    std::unique_ptr<humanoid_robot::framework::common::ConfigManager> config_manager_;
+    humanoid_robot::framework::common::ConfigNode loaded_config_;
 };
 
 // ==================== ControlImpl实现 ====================
@@ -124,7 +128,20 @@ public:
 };
 
 // ==================== ROS2Communication实现 ====================
-ROS2Communication::ROS2Communication() : ros_initialized_(false) {}
+ROS2Communication::ROS2Communication() : ros_initialized_(false) {
+    std::string config_path = "/home/cl/Downloads/00code_build_space/Humanoid_Robot_Interfaces_Server/config/software.yaml";
+    try {
+        loaded_config_ = config_manager_->LoadFromFile(config_path);
+        if (loaded_config_.IsEmpty()) {
+        WLOG_ERROR("[Control] Config file loaded but empty: %s", config_path.c_str());
+        } else {
+        WLOG_INFO("[Control] Config file loaded successfully: %s", config_path.c_str());
+        }
+    } catch (const std::exception& e) {
+        WLOG_ERROR("[Control] Failed to load config file: %s, error: %s", config_path.c_str(), e.what());
+        loaded_config_ = humanoid_robot::framework::common::ConfigNode(); // 初始化为空节点
+    }
+    }
 
 ROS2Communication::~ROS2Communication() {
     Cleanup();
@@ -139,15 +156,20 @@ bool ROS2Communication::Initialize() {
             char** argv = nullptr;
             rclcpp::init(argc, argv);
         }
-        
-        node_ = std::make_shared<rclcpp::Node>("humanoid_control_module");
-        cmd_vel_pub_ = node_->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
-        joint_motion_pub_ = node_->create_publisher<motor_interface::msg::MotorDrive>("/motor_drive", 10);
+        std::string node_name = loaded_config_["software"]["modules"]["control"]["ros2"]["node_name"];
+        std::string cmd_vel = loaded_config_["software"]["modules"]["control"]["ros2"]["topics"]["cmd_vel"];
+        std::string motor_drive = loaded_config_["software"]["modules"]["control"]["ros2"]["topics"]["motor_drive"];
+        std::string motor_feedback = loaded_config_["software"]["modules"]["control"]["ros2"]["topics"]["motor_feedback"];
+        int queue_size = std::stoi(loaded_config_["software"]["modules"]["control"]["ros2"]["queue_size"]);
+
+        node_ = std::make_shared<rclcpp::Node>(node_name);
+        cmd_vel_pub_ = node_->create_publisher<geometry_msgs::msg::Twist>(cmd_vel, queue_size);
+        joint_motion_pub_ = node_->create_publisher<motor_interface::msg::MotorDrive>(motor_drive, queue_size);
         
         // 创建电机反馈订阅者
         if (feedback_callback_) {
             motor_feedback_sub_ = node_->create_subscription<motor_interface::msg::MotorFeedback>(
-                "/motorFbk_topic", 10,
+                motor_feedback, queue_size,
                 [this](const motor_interface::msg::MotorFeedback::SharedPtr msg) {
                     this->feedback_callback_(msg.get());
                 });
@@ -244,7 +266,20 @@ void ROS2Communication::SetMotorFeedbackCallback(MotorFeedbackCallback callback)
 }
 
 // ==================== FrameworkCommunication实现 ====================
-FrameworkCommunication::FrameworkCommunication() : initialized_(false) {}
+FrameworkCommunication::FrameworkCommunication() : initialized_(false) {
+    std::string config_path = "/home/cl/Downloads/00code_build_space/Humanoid_Robot_Interfaces_Server/config/software.yaml";
+    try {
+        loaded_config_ = config_manager_->LoadFromFile(config_path);
+        if (loaded_config_.IsEmpty()) {
+        WLOG_ERROR("[Control] Config file loaded but empty: %s", config_path.c_str());
+        } else {
+        WLOG_INFO("[Control] Config file loaded successfully: %s", config_path.c_str());
+        }
+    } catch (const std::exception& e) {
+        WLOG_ERROR("[Control] Failed to load config file: %s, error: %s", config_path.c_str(), e.what());
+        loaded_config_ = humanoid_robot::framework::common::ConfigNode(); // 初始化为空节点
+    }
+}
 
 FrameworkCommunication::~FrameworkCommunication() {
     Cleanup();
@@ -253,30 +288,43 @@ FrameworkCommunication::~FrameworkCommunication() {
 bool FrameworkCommunication::Initialize() {
     try {
         WLOG_DEBUG("[FrameworkCommunication] Initializing framework communication");
-        
+        auto node_options_config = loaded_config_["software"]["modules"]["control"]["framework"]["node_options"];
+        int heartbeat_interval_ms = std::stoi(node_options_config["heartbeat_interval_ms"]);
+        bool enable_dds_discovery = std::string(node_options_config["enable_dds_discovery"]) == "true";
+        bool enable_uds = std::string(node_options_config["enable_uds"]) == "true";
         humanoid_robot::framework::net::CNodeOptions node_options;
-        node_options.enable_dds_discovery = true;
-        node_options.enable_uds = true;
-        node_options.heartbeat_interval_ms = 1000;
+        node_options.enable_dds_discovery = enable_dds_discovery;
+        node_options.enable_uds = enable_uds;
+        node_options.heartbeat_interval_ms = heartbeat_interval_ms;
         
-        node_ = std::make_shared<humanoid_robot::framework::net::CNode>("humanoid_control_module", node_options);
+        std::string node_name = loaded_config_["software"]["modules"]["control"]["framework"]["node_name"];
+        node_ = std::make_shared<humanoid_robot::framework::net::CNode>(node_name, node_options);
         
+        auto publisher_config = loaded_config_["software"]["modules"]["control"]["framework"]["publisher"];
+        auto pub_options_config = publisher_config["pub_options"];
+        std::string grpc_address = pub_options_config["grpc_address"];
+        bool pub_enable_dds_discovery = std::string(pub_options_config["enable_dds_discovery"]) == "true";
+        bool enable_dual_server = std::string(pub_options_config["enable_dual_server"]) == "true";
+        std::string uds_path = pub_options_config["uds_path"];
+        std::string cmd_vel = publisher_config["cmd_vel"];
+        std::string motor_drive = publisher_config["motor_drive"];
+
         // 配置发布者选项
         humanoid_robot::framework::net::CPublisherOptions pub_options;
-        pub_options.grpc_address = "0.0.0.0:0";  // 自动分配TCP端口
-        pub_options.enable_dds_discovery = true;
-        pub_options.enable_dual_server = true;   // 启用TCP+UDS双服务
-        
+        pub_options.grpc_address = grpc_address;  // 自动分配TCP端口
+        pub_options.enable_dds_discovery = pub_enable_dds_discovery;
+        pub_options.enable_dual_server = enable_dual_server;   // 启用TCP+UDS双服务
+
         // 创建cmd_vel发布者
-        cmd_vel_pub_ = node_->CreatePublisher<geometry_msgs::msg::Twist>("/cmd_vel", pub_options);
+        cmd_vel_pub_ = node_->CreatePublisher<geometry_msgs::msg::Twist>(cmd_vel, pub_options);
         if (!cmd_vel_pub_) {
             WLOG_ERROR("[FrameworkCommunication] Failed to create cmd_vel publisher");
             return false;
         }
         
         // 创建motor_drive发布者
-        pub_options.uds_path = "/tmp/humanoid_motor_drive.sock";
-        joint_motion_pub_ = node_->CreatePublisher<motor_interface::msg::MotorDrive>("/motor_drive", pub_options);
+        pub_options.uds_path = uds_path;
+        joint_motion_pub_ = node_->CreatePublisher<motor_interface::msg::MotorDrive>(motor_drive, pub_options);
         if (!joint_motion_pub_) {
             WLOG_ERROR("[FrameworkCommunication] Failed to create joint_motion publisher");
             return false;
@@ -284,11 +332,17 @@ bool FrameworkCommunication::Initialize() {
         
         // 创建电机反馈订阅者
         if (feedback_callback_) {
+            auto motor_feedback_config = loaded_config_["software"]["modules"]["control"]["framework"]["subscriber"]["motor_feedback"];
+            bool sub_enable_dds_discovery = std::string(motor_feedback_config["enable_dds_discovery"]) == "true";
+            bool sub_enable_uds = std::string(motor_feedback_config["enable_uds"]) == "true";
+            int thread_pool_size = std::stoi(motor_feedback_config["thread_pool_size"]);
+            int reconnect_interval = std::stoi(motor_feedback_config["reconnect_interval_s"]);
+
             humanoid_robot::framework::net::CSubscriberOptions sub_options;
-            sub_options.enable_dds_discovery = true;
-            sub_options.prefer_uds = true;         // 优先使用UDS
-            sub_options.thread_pool_size = 2;
-            sub_options.reconnect_interval = std::chrono::seconds(2);
+            sub_options.enable_dds_discovery = sub_enable_dds_discovery;
+            sub_options.prefer_uds = sub_enable_uds;         // 优先使用UDS
+            sub_options.thread_pool_size = thread_pool_size;
+            sub_options.reconnect_interval = std::chrono::seconds(reconnect_interval);
             
             motor_feedback_sub_ = node_->CreateSubscriber<motor_interface::msg::MotorFeedback>(
                 "/motorFbk_topic",
