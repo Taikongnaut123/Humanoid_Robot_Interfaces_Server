@@ -129,7 +129,7 @@ public:
 
 // ==================== ROS2Communication实现 ====================
 ROS2Communication::ROS2Communication() : ros_initialized_(false) {
-    std::string config_path = "/home/cl/Downloads/00code_build_space/Humanoid_Robot_Interfaces_Server/config/software.yaml";
+    std::string config_path = "config/software.yaml";
     try {
         loaded_config_ = config_manager_->LoadFromFile(config_path);
         if (loaded_config_.IsEmpty()) {
@@ -267,7 +267,7 @@ void ROS2Communication::SetMotorFeedbackCallback(MotorFeedbackCallback callback)
 
 // ==================== FrameworkCommunication实现 ====================
 FrameworkCommunication::FrameworkCommunication() : initialized_(false) {
-    std::string config_path = "/home/cl/Downloads/00code_build_space/Humanoid_Robot_Interfaces_Server/config/software.yaml";
+    std::string config_path = "config/software.yaml";
     try {
         loaded_config_ = config_manager_->LoadFromFile(config_path);
         if (loaded_config_.IsEmpty()) {
