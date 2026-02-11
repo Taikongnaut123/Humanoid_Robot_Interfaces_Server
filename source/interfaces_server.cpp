@@ -577,6 +577,18 @@ void InterfaceServiceImpl::SendSimulatedNotification(
 
 InterfacesServer::InterfacesServer() {
   service_ = std::make_unique<InterfaceServiceImpl>();
+  std::string config_path = "config/software.yaml";
+  try {
+    loaded_config_ = config_manager_->LoadFromFile(config_path);
+    if (loaded_config_.IsEmpty()) {
+      WLOG_ERROR("[InterfacesServer] Config file loaded but empty: %s", config_path.c_str());
+    } else {
+      WLOG_INFO("[InterfacesServer] Config file loaded successfully: %s", config_path.c_str());
+    }
+  } catch (const std::exception& e) {
+    WLOG_ERROR("[InterfacesServer] Failed to load config file: %s, error: %s", config_path.c_str(), e.what());
+    loaded_config_ = humanoid_robot::framework::common::ConfigNode(); // 初始化为空节点
+  }
 }
 
 InterfacesServer::~InterfacesServer() { Stop(); }
@@ -585,34 +597,48 @@ bool InterfacesServer::Start(const std::string &server_address) {
   try {
 
     grpc::ServerBuilder builder;
+    auto connection_config = loaded_config_["software"]["communication"]["grpc_server"]["connection"];
+    int max_connection_idle_ms = std::stoi(connection_config["max_connection_idle_ms"]);
+    builder.AddChannelArgument(GRPC_ARG_MAX_CONNECTION_IDLE_MS, max_connection_idle_ms);
 
-    builder.AddChannelArgument(GRPC_ARG_MAX_CONNECTION_IDLE_MS,
-                               600000); // 设置最大连接空闲时间为60秒
+    int max_connection_age_ms = std::stoi(connection_config["max_connection_age_ms"]);
     builder.AddChannelArgument(GRPC_ARG_MAX_CONNECTION_AGE_MS,
-                               1200000); // 设置最大连接年龄为20分钟
+                               max_connection_age_ms); // 设置最大连接年龄为20分钟
+    int keepalive_time_ms = std::stoi(connection_config["keepalive_time_ms"]);                          
     builder.AddChannelArgument(GRPC_ARG_KEEPALIVE_TIME_MS,
-                               30000); // 设置keepalive时间为30秒
+                               keepalive_time_ms); // 设置keepalive时间为30秒
+    int keepalive_timeout_ms = std::stoi(connection_config["keepalive_timeout_ms"]);                        
     builder.AddChannelArgument(GRPC_ARG_KEEPALIVE_TIMEOUT_MS,
-                               10000); // 设置keepalive超时时e为10秒
+                               keepalive_timeout_ms); // 设置keepalive超时时e为10秒
+    int max_pings_without_data = std::stoi(connection_config["max_pings_without_data"]);
     builder.AddChannelArgument(GRPC_ARG_HTTP2_MAX_PINGS_WITHOUT_DATA,
-                               5); // 设置最大无数据ping次数为5
+                               max_pings_without_data); // 设置最大无数据ping次数为5
+    int min_recv_ping_interval_ms = std::stoi(connection_config["min_recv_ping_interval_ms"]);
     builder.AddChannelArgument(
-        GRPC_ARG_HTTP2_MIN_RECV_PING_INTERVAL_WITHOUT_DATA_MS, 10000);
+        GRPC_ARG_HTTP2_MIN_RECV_PING_INTERVAL_WITHOUT_DATA_MS, min_recv_ping_interval_ms);
 
+    auto thread_config = loaded_config_["software"]["communication"]["grpc_server"]["thread_pool"];
+    int num_cqs = std::stoi(thread_config["num_cqs"]);
     builder.SetSyncServerOption(grpc::ServerBuilder::SyncServerOption::NUM_CQS,
-                                4); // 设置4个工作线程
+                                num_cqs); // 设置4个工作线程
+    int max_pollers = std::stoi(thread_config["max_pollers"]);                            
     builder.SetSyncServerOption(
-        grpc::ServerBuilder::SyncServerOption::MAX_POLLERS, 4); // 设置4个轮询器
+        grpc::ServerBuilder::SyncServerOption::MAX_POLLERS, max_pollers); // 设置4个轮询器
+    int min_pollers = std::stoi(thread_config["min_pollers"]);
     builder.SetSyncServerOption(
         grpc::ServerBuilder::SyncServerOption::MIN_POLLERS,
-        1); // 设置最小轮询器为1
+        min_pollers); // 设置最小轮询器为1
+    int cq_timeout_ms = std::stoi(thread_config["cq_timeout_ms"]);
     builder.SetSyncServerOption(
         grpc::ServerBuilder::SyncServerOption::CQ_TIMEOUT_MSEC,
-        10000); // 设置CQ超时时间为10秒
+        cq_timeout_ms); // 设置CQ超时时间为10秒
 
     // 4. 消息大小限制
-    builder.SetMaxReceiveMessageSize(4 * 1024 * 1024); // 4MB
-    builder.SetMaxSendMessageSize(4 * 1024 * 1024);    // 4MB
+    auto message_size_config = loaded_config_["software"]["communication"]["grpc_server"]["message_size"];
+    int max_receive_mb = std::stoi(message_size_config["max_receive_mb"]);
+    builder.SetMaxReceiveMessageSize(max_receive_mb * 1024 * 1024); // 4MB
+    int max_send_mb = std::stoi(message_size_config["max_send_mb"]);
+    builder.SetMaxSendMessageSize(max_send_mb * 1024 * 1024);    // 4MB
 
     grpc::EnableDefaultHealthCheckService(true);
     grpc::reflection::InitProtoReflectionServerBuilderPlugin();

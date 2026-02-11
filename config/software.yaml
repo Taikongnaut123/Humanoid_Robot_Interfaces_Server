@@ -1,0 +1,239 @@
+# 机器人软件模块配置文件
+software:
+  # 模块通用配置
+  general:
+    # 软件版本
+    version: "1.0.0"
+    # 运行环境: debug, release, test
+    runtime_env: "release"
+    # SDK Server专属配置
+    sdk_server:
+      # 命令执行默认超时时间 (ms)
+      command_timeout_ms: 10000
+      # 可执行文件日志基础路径（相对可执行文件目录）
+      log_base_path: "SDK-Server/logs"
+
+  # 子模块：通信配置
+  communication:
+    # 网络配置
+    network:
+      # 主控制器IP
+      master_ip: "192.168.1.100"
+      # 主控制器端口
+      master_port: 8080
+      # 通信协议: tcp, udp
+      protocol: "tcp"
+      # 心跳包周期 (s)
+      heartbeat_cycle: 1.0
+      # 重连次数
+      reconnect_count: 5
+    # gRPC服务器核心配置
+    grpc_server:
+      # 对外提供服务的地址
+      server_address: "0.0.0.0:50051"
+      # 连接配置
+      connection:
+        # 最大连接空闲时间 (ms)
+        max_connection_idle_ms: 600000
+        # 最大连接年龄 (ms)
+        max_connection_age_ms: 1200000
+        # keepalive发送时间 (ms)
+        keepalive_time_ms: 30000
+        # keepalive超时时间 (ms)
+        keepalive_timeout_ms: 10000
+        # 最大无数据ping次数
+        max_pings_without_data: 5
+        # 最小无数据ping间隔 (ms)
+        min_recv_ping_interval_ms: 10000
+      # 线程池配置
+      thread_pool:
+        # 工作队列数量 (NUM_CQS)
+        num_cqs: 4
+        # 最大轮询器数量
+        max_pollers: 4
+        # 最小轮询器数量
+        min_pollers: 1
+        # CQ超时时间 (ms)
+        cq_timeout_ms: 10000
+      # 消息大小限制
+      message_size:
+        # 最大接收消息大小 (MB)
+        max_receive_mb: 4
+        # 最大发送消息大小 (MB)
+        max_send_mb: 4
+
+    grpc_client:
+      # 服务器连接配置
+      connection:
+        # 默认连接目标（IP:Port）
+        default_target: "192.168.1.100:50051"
+        # 通道就绪等待超时 (ms)
+        channel_ready_timeout_ms: 5000
+        # 通道状态检查间隔 (s)
+        channel_check_interval_s: 1
+      # gRPC通道参数
+      channel:
+        # 最大接收消息大小 (MB)
+        max_receive_mb: 100
+        # 最大发送消息大小 (MB)
+        max_send_mb: 100
+      # 通用超时配置
+      timeout:
+        # Send接口默认超时 (ms)
+        send_default_ms: 10000
+        # Query接口默认超时 (ms)
+        query_default_ms: 5000
+        # Action接口默认超时 (ms)
+        action_default_ms: 30000
+        # Subscribe/Unsubscribe接口默认超时 (ms)
+        subscribe_default_ms: 5000
+
+  # 子模块：订阅管理配置
+  subscription:
+    # 默认心跳间隔 (ms)
+    default_heartbeat_interval_ms: 10000
+    # 心跳超时阈值（心跳间隔的倍数）
+    heartbeat_timeout_multiplier: 2
+    # 心跳监控检查周期 (s)
+    heartbeat_monitor_cycle_s: 30
+    # 默认客户端端点（备用）
+    default_client_endpoint: "localhost:50052"
+    # 模拟通知配置（测试用）
+    simulated_notification:
+      # 发送次数
+      send_count: 10
+      # 发送间隔 (s)
+      send_interval_s: 1
+      # 延迟发送时间 (s)
+      delay_send_s: 5
+
+  # 子模块：模块管理配置
+  module_manager:
+    # 模块状态检查周期 (s)
+    check_cycle_s: 5
+    # 模块停止重试次数
+    stop_retry_count: 3
+    # 模块停止重试间隔 (s)
+    stop_retry_interval_s: 1
+    # 启用自动重启非运行模块
+    enable_auto_restart: true
+
+  modules:
+    # 控制模块配置（ControlModule）
+    control:
+      # 通信类型: ros2, framework
+      comm_type: "framework"
+      # ROS2通信配置
+      ros2:
+        node_name: "humanoid_control_module"
+        topics:
+          cmd_vel: "/cmd_vel"
+          motor_drive: "/motor_drive"
+          motor_feedback: "/motorFbk_topic"
+        queue_size: 10
+      # 自定义框架通信配置
+      framework:
+        node_name: "humanoid_control_module"
+        node_options:
+          enable_dds_discovery: true
+          enable_uds: true
+          heartbeat_interval_ms: 1000
+        publisher:
+          cmd_vel:
+            grpc_address: "0.0.0.0:0"
+            enable_dds_discovery: true
+            enable_dual_server: true
+          motor_drive:
+            grpc_address: "0.0.0.0:0"
+            enable_dds_discovery: true
+            enable_dual_server: true
+            uds_path: "/tmp/humanoid_motor_drive.sock"
+        subscriber:
+          motor_feedback:
+            topic: "/motorFbk_topic"
+            enable_dds_discovery: true
+            prefer_uds: true
+            thread_pool_size: 2
+            reconnect_interval_s: 2
+
+    # 导航模块配置（NavigationModule）
+    navigation:
+      node_name: "navigation_node_sdk"
+      service_target: "navigation_service"
+      client_options:
+        enable_dds_discovery: true
+        prefer_uds: true
+        default_timeout_s: 5
+        manual_service_address: "192.168.20.190:50052"  # 可选手动配置
+      timeout:
+        init_wait_s: 5
+        status_check_s: 3
+
+    # 感知模块配置（PerceptionModule）
+    perception:
+      # 连接配置
+      connection:
+        target_address: "localhost:50052"
+        connect_timeout_s: 5
+        call_timeout_s: 10
+      # gRPC通道配置
+      grpc_channel:
+        max_receive_mb: 100
+        max_send_mb: 100
+      # 处理配置
+      processing:
+        simulate_delay:
+          enable: false
+          min_ms: 10
+          max_ms: 100
+        requires_masks:
+          perception: true
+          detection: false
+          division: true
+
+  # 子模块：日志配置
+  logging:
+    # 日志级别: TRACE, DEBUG, INFO, WARN, ERROR, FATAL
+    level: "INFO"
+    # 日志输出方式: file, console, remote
+    output_mode: ["file", "console"]
+    # 日志文件路径（最终路径 = general.sdk_server.log_base_path + 此路径）
+    file_path: "/"
+    # 日志文件大小限制 (MB)
+    file_size_limit: 100
+    # 日志文件保留天数
+    file_retention_days: 7
+    # 是否启用日志轮转
+    enable_rotation: true
+
+  # 子模块：数据管理（预留）
+  data_management:
+    # 数据存储类型: sqlite, mysql, mongodb
+    storage_type: "sqlite"
+    # 数据库文件路径
+    db_path: "/data/robot.db"
+    # 数据备份周期 (h)
+    backup_cycle: 24
+    # 数据清理周期 (d)
+    cleanup_cycle: 30
+    # 关键数据保留时间 (d)
+    key_data_retention: 90
+
+  # 子模块：系统监控（预留）
+  system_monitor:
+    # 监控周期 (s)
+    monitor_cycle: 1.0
+    # 监控项
+    monitor_items:
+      - "cpu_usage"
+      - "memory_usage"
+      - "disk_usage"
+      - "network_status"
+      - "process_status"
+    # 告警阈值
+    alert_thresholds:
+      cpu_usage: 80.0    # %
+      memory_usage: 85.0 # %
+      disk_usage: 90.0   # %
+    # 告警方式: email, sms, mqtt
+    alert_methods: ["mqtt"]

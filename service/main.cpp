@@ -29,7 +29,14 @@ void SignalHandler(int signal) {
 }
 
 int main(int argc, char **argv) {
-  WLogSetPath(GetExeDir() + "/SDK-Server/logs");
+
+  std::string config_path = "config/software.yaml";
+  // 配置管理器
+  std::unique_ptr<humanoid_robot::framework::common::ConfigManager> config_manager_;
+  humanoid_robot::framework::common::ConfigNode loaded_config_ = config_manager_->LoadFromFile(config_path);
+  std::string log_base_path = loaded_config_["software"]["general"]["sdk_server"]["log_base_path"];
+  
+  WLogSetPath(GetExeDir() + log_base_path);
   WLogInit();
   // 设置信号处理
   signal(SIGINT, SignalHandler);
@@ -46,7 +53,11 @@ int main(int argc, char **argv) {
     g_server = std::make_unique<InterfacesServer>();
 
     // 启动服务器 - 监听Client-SDK连接
-    std::string server_address = "0.0.0.0:50051"; // 对外提供服务的地址
+    std::string server_address = loaded_config_["software"]["communication"]["grpc_server"]["server_address"];
+    if (server_address.empty()) {
+      WLOG_ERROR("server_address is empty");
+      return 1;
+    }
     if (!g_server->Start(server_address)) {
       WLOG_ERROR("Failed to start server!");
       return 1;

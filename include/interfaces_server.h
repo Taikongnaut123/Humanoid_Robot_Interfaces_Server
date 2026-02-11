@@ -159,6 +159,9 @@ public:
 private:
   std::unique_ptr<grpc::Server> server_;
   std::unique_ptr<InterfaceServiceImpl> service_;
+  // 配置管理器
+  std::unique_ptr<humanoid_robot::framework::common::ConfigManager> config_manager_;
+  humanoid_robot::framework::common::ConfigNode loaded_config_;
 };
 
 } // namespace server
